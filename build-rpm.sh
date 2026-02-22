@@ -30,6 +30,7 @@ mkdir -p "$BUILD_ROOT/SOURCES/$TARBALL_DIR"
 cp -r "$SCRIPT_DIR/src" "$BUILD_ROOT/SOURCES/$TARBALL_DIR/"
 cp -r "$SCRIPT_DIR/bin" "$BUILD_ROOT/SOURCES/$TARBALL_DIR/"
 cp -r "$SCRIPT_DIR/assets" "$BUILD_ROOT/SOURCES/$TARBALL_DIR/"
+cp -r "$SCRIPT_DIR/nautilus" "$BUILD_ROOT/SOURCES/$TARBALL_DIR/"
 cp "$SCRIPT_DIR/README.md" "$BUILD_ROOT/SOURCES/$TARBALL_DIR/"
 cp "$SCRIPT_DIR/LICENSE" "$BUILD_ROOT/SOURCES/$TARBALL_DIR/"
 
@@ -56,6 +57,7 @@ Requires:       python3
 Requires:       python3-gobject
 Requires:       libappindicator-gtk3
 Requires:       rclone >= 1.61
+Recommends:     nautilus-python
 
 %description
 A lightweight GTK system tray application for Proton Drive,
@@ -65,6 +67,7 @@ powered by rclone. Features include:
 - Pause/resume sync
 - Auto-mount on startup
 - Settings dialog for configuration
+- Nautilus sync status emblems (synced/syncing/pending/error)
 
 %prep
 %setup -q
@@ -73,10 +76,22 @@ powered by rclone. Features include:
 mkdir -p %{buildroot}%{_bindir}
 mkdir -p %{buildroot}%{_datadir}/%{name}
 mkdir -p %{buildroot}%{_datadir}/applications
+mkdir -p %{buildroot}%{_datadir}/nautilus-python/extensions
 
 install -m 755 bin/proton-drive-gtk %{buildroot}%{_bindir}/
 install -m 644 src/*.py %{buildroot}%{_datadir}/%{name}/
 install -m 644 assets/proton-drive-gtk.desktop.in %{buildroot}%{_datadir}/applications/proton-drive-gtk.desktop
+install -m 644 nautilus/proton_drive_nautilus.py %{buildroot}%{_datadir}/nautilus-python/extensions/
+
+# Install emblem icons
+for size in 16x16 22x22 24x24 32x32 48x48; do
+    mkdir -p %{buildroot}%{_datadir}/icons/hicolor/\${size}/emblems
+    if [ -d assets/icons/emblems/\${size} ]; then
+        install -m 644 assets/icons/emblems/\${size}/*.png %{buildroot}%{_datadir}/icons/hicolor/\${size}/emblems/ 2>/dev/null || true
+    fi
+done
+mkdir -p %{buildroot}%{_datadir}/icons/hicolor/scalable/emblems
+install -m 644 assets/icons/emblems/scalable/*.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/emblems/ 2>/dev/null || true
 
 %files
 %license LICENSE
@@ -84,6 +99,16 @@ install -m 644 assets/proton-drive-gtk.desktop.in %{buildroot}%{_datadir}/applic
 %{_bindir}/proton-drive-gtk
 %{_datadir}/%{name}/
 %{_datadir}/applications/proton-drive-gtk.desktop
+%{_datadir}/nautilus-python/extensions/proton_drive_nautilus.py
+%{_datadir}/icons/hicolor/*/emblems/emblem-proton-*.png
+%{_datadir}/icons/hicolor/scalable/emblems/emblem-proton-*.svg
+
+%post
+/usr/bin/gtk-update-icon-cache -f -t %{_datadir}/icons/hicolor &>/dev/null || :
+/usr/bin/update-desktop-database %{_datadir}/applications &>/dev/null || :
+
+%postun
+/usr/bin/gtk-update-icon-cache -f -t %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
 * Sun Feb 22 2026 Achraf Soltani <achraf.soltani@gmail.com> - 1.0.0-1

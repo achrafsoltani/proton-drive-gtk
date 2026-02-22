@@ -19,9 +19,28 @@ mkdir -p "$BUILD_DIR/usr/bin"
 mkdir -p "$BUILD_DIR/usr/share/proton-drive-gtk"
 mkdir -p "$BUILD_DIR/usr/share/applications"
 mkdir -p "$BUILD_DIR/usr/share/doc/${PACKAGE}"
+mkdir -p "$BUILD_DIR/usr/share/nautilus-python/extensions"
+
+# Create icon directories
+SIZES="16x16 22x22 24x24 32x32 48x48"
+for size in $SIZES; do
+    mkdir -p "$BUILD_DIR/usr/share/icons/hicolor/$size/emblems"
+done
+mkdir -p "$BUILD_DIR/usr/share/icons/hicolor/scalable/emblems"
 
 # Copy source files
 cp "$SCRIPT_DIR/src/"*.py "$BUILD_DIR/usr/share/proton-drive-gtk/"
+
+# Copy Nautilus extension
+cp "$SCRIPT_DIR/nautilus/proton_drive_nautilus.py" "$BUILD_DIR/usr/share/nautilus-python/extensions/"
+
+# Copy emblem icons
+for size in $SIZES; do
+    if [ -d "$SCRIPT_DIR/assets/icons/emblems/$size" ]; then
+        cp "$SCRIPT_DIR/assets/icons/emblems/$size/"*.png "$BUILD_DIR/usr/share/icons/hicolor/$size/emblems/" 2>/dev/null || true
+    fi
+done
+cp "$SCRIPT_DIR/assets/icons/emblems/scalable/"*.svg "$BUILD_DIR/usr/share/icons/hicolor/scalable/emblems/" 2>/dev/null || true
 
 # Copy and make executable the launcher
 cp "$SCRIPT_DIR/bin/proton-drive-gtk" "$BUILD_DIR/usr/bin/"
@@ -42,6 +61,7 @@ Section: net
 Priority: optional
 Architecture: ${ARCH}
 Depends: python3, python3-gi, gir1.2-ayatanaappindicator3-0.1, rclone (>= 1.61)
+Recommends: python3-nautilus
 Maintainer: Achraf Soltani <achraf.soltani@gmail.com>
 Homepage: https://github.com/achrafsoltani/proton-drive-gtk
 Description: GTK system tray application for Proton Drive
@@ -52,6 +72,7 @@ Description: GTK system tray application for Proton Drive
   - Pause/resume sync
   - Auto-mount on startup
   - Settings dialog for configuration
+  - Nautilus sync status emblems (synced/syncing/pending/error)
 EOF
 
 # Create postinst script
@@ -64,6 +85,11 @@ if command -v update-desktop-database &> /dev/null; then
     update-desktop-database -q /usr/share/applications/ 2>/dev/null || true
 fi
 
+# Update icon cache for emblems
+if command -v gtk-update-icon-cache &> /dev/null; then
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
+fi
+
 echo ""
 echo "Proton Drive GTK installed successfully!"
 echo ""
@@ -71,6 +97,10 @@ echo "Before using, configure rclone with your Proton account:"
 echo "  rclone config"
 echo ""
 echo "Then run: proton-drive-gtk"
+echo ""
+echo "Note: For Nautilus sync emblems, install python3-nautilus and restart Nautilus:"
+echo "  sudo apt install python3-nautilus"
+echo "  nautilus -q"
 echo ""
 EOF
 chmod 755 "$BUILD_DIR/DEBIAN/postinst"
