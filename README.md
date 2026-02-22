@@ -157,6 +157,33 @@ Settings are stored in `~/.config/proton-drive-gtk/config.json`:
 - **vfs_cache_mode** - rclone cache mode (default: `full`)
 - **show_notifications** - Enable desktop notifications
 
+## Security Considerations
+
+### rclone password storage
+rclone stores your Proton password in `~/.config/rclone/rclone.conf` using "obscured" encoding, which is **not encryption**. Anyone with read access to this file can decode your password.
+
+**Mitigations:**
+- Ensure proper file permissions: `chmod 600 ~/.config/rclone/rclone.conf`
+- Consider using rclone's `--password-command` for external secret management
+- Use full-disk encryption on your system
+
+### RC interface authentication
+The rclone remote control interface is protected with randomly-generated per-session credentials. This prevents other local processes from controlling your mount.
+
+### VFS cache
+Cached files are stored in `~/.cache/rclone/vfs/` unencrypted. Local processes with your user permissions can read these files.
+
+**Mitigations:**
+- Use `vfs-cache-mode=off` or `minimal` if caching sensitive files is a concern
+- Ensure ~/.cache has proper permissions
+- Use full-disk encryption
+
+### Recommendations
+1. Enable 2FA on your Proton account
+2. Use full-disk encryption (LUKS)
+3. Keep your system updated
+4. Review rclone config file permissions
+
 ## License
 
 MIT

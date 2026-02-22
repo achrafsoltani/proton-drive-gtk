@@ -12,7 +12,11 @@ from typing import Optional
 from dataclasses import dataclass
 from config import Config
 
-RC_PORT = 5572  # Default rclone rc port
+import secrets
+import tempfile
+import stat
+
+RC_PORT = 5572
 
 
 class MountStatus(Enum):
@@ -54,6 +58,9 @@ class RcloneManager:
         self._mount_process: Optional[subprocess.Popen] = None
         self._status = MountStatus.UNMOUNTED
         self._paused = False
+        # Generate random credentials for RC auth (per session)
+        self._rc_user = "proton"
+        self._rc_pass = secrets.token_urlsafe(16)
 
     @property
     def status(self) -> MountStatus:
@@ -76,12 +83,17 @@ class RcloneManager:
             return False
 
     def _rc_command(self, command: str, params: dict = None) -> Optional[dict]:
-        """Execute an rclone rc command."""
+        """Execute an rclone rc command with authentication."""
         if not self._is_rc_running():
             return None
 
         try:
-            cmd = ["rclone", "rc", command, f"--rc-addr=127.0.0.1:{RC_PORT}"]
+            cmd = [
+                "rclone", "rc", command,
+                f"--rc-addr=127.0.0.1:{RC_PORT}",
+                f"--rc-user={self._rc_user}",
+                f"--rc-pass={self._rc_pass}",
+            ]
             if params:
                 for key, value in params.items():
                     cmd.append(f"--json={json.dumps({key: value})}")
@@ -124,7 +136,7 @@ class RcloneManager:
         mount_path = Path(self.config.mount_path)
         mount_path.mkdir(parents=True, exist_ok=True)
 
-        # Build rclone command with rc enabled (no --daemon, we'll background it)
+        # Build rclone command with rc enabled and authentication
         cmd = [
             "rclone", "mount",
             f"{self.config.remote_name}:",
@@ -132,7 +144,8 @@ class RcloneManager:
             f"--vfs-cache-mode={self.config.vfs_cache_mode}",
             f"--rc",
             f"--rc-addr=127.0.0.1:{RC_PORT}",
-            "--rc-no-auth",
+            f"--rc-user={self._rc_user}",
+            f"--rc-pass={self._rc_pass}",
         ]
 
         self._status = MountStatus.MOUNTING
