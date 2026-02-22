@@ -1,0 +1,22 @@
+Source: proton-drive-gtk
+Section: net
+Priority: optional
+Maintainer: Achraf Soltani <achraf.soltani@gmail.com>
+Build-Depends: debhelper-compat (= 13), python3, dh-python
+Standards-Version: 4.6.0
+Homepage: https://github.com/achrafsoltani/proton-drive-gtk
+Vcs-Browser: https://github.com/achrafsoltani/proton-drive-gtk
+Vcs-Git: https://github.com/achrafsoltani/proton-drive-gtk.git
+Rules-Requires-Root: no
+
+Package: proton-drive-gtk
+Architecture: all
+Depends: ${misc:Depends}, ${python3:Depends}, python3, python3-gi, gir1.2-ayatanaappindicator3-0.1, rclone (>= 1.61)
+Description: GTK system tray application for Proton Drive
+ A lightweight GTK system tray application for Proton Drive,
+ powered by rclone. Features include:
+  - Mount/unmount Proton Drive with one click
+  - Transfer rate display during sync
+  - Pause/resume sync
+  - Auto-mount on startup
+  - Settings dialog for configuration

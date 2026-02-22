@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""Proton Drive GTK launcher."""
+
+import sys
+import os
+
+# Add the installed module path
+sys.path.insert(0, '/usr/share/proton-drive-gtk')
+
+from main import main
+
+if __name__ == '__main__':
+    main()

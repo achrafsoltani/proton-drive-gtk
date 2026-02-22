@@ -104,12 +104,33 @@ Verify the configuration:
 rclone lsd protondrive:
 ```
 
-### 4. Clone and install
+### 4. Install
+
+**Option A: Install from .deb package (Debian/Ubuntu)**
+
+```bash
+# Download latest release
+wget https://github.com/AchrafSoltani/proton-drive-gtk/releases/download/v1.0.0/proton-drive-gtk_1.0.0_all.deb
+
+# Install
+sudo dpkg -i proton-drive-gtk_1.0.0_all.deb
+```
+
+**Option B: Install from source**
 
 ```bash
 git clone https://github.com/AchrafSoltani/proton-drive-gtk.git
 cd proton-drive-gtk
 ./install.sh
+```
+
+**Option C: Build .deb from source**
+
+```bash
+git clone https://github.com/AchrafSoltani/proton-drive-gtk.git
+cd proton-drive-gtk
+./build-deb.sh
+sudo dpkg -i dist/proton-drive-gtk_1.0.0_all.deb
 ```
 
 ## Usage

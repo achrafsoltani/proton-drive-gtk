@@ -1,0 +1,10 @@
+proton-drive-gtk (1.0.0) unstable; urgency=medium
+
+  * Initial release
+  * System tray with mount/unmount controls
+  * Transfer rate display
+  * Pause/resume sync
+  * Settings dialog
+  * RC authentication for security
+
+ -- Achraf Soltani <achraf.soltani@gmail.com>  Sat, 22 Feb 2026 08:00:00 +0100
