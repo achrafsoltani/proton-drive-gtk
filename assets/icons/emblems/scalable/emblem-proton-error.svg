@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <defs>
+    <linearGradient id="errorGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#F44336"/>
+      <stop offset="100%" style="stop-color:#C62828"/>
+    </linearGradient>
+  </defs>
+  <circle cx="8" cy="8" r="7" fill="url(#errorGrad)" stroke="#B71C1C" stroke-width="0.5"/>
+  <!-- X mark -->
+  <line x1="5" y1="5" x2="11" y2="11" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+  <line x1="11" y1="5" x2="5" y2="11" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+</svg>
