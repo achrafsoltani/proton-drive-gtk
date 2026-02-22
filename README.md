@@ -110,13 +110,27 @@ rclone lsd protondrive:
 
 ```bash
 # Download latest release
-wget https://github.com/AchrafSoltani/proton-drive-gtk/releases/download/v1.0.0/proton-drive-gtk_1.0.0_all.deb
+wget https://github.com/AchrafSoltani/proton-drive-gtk/releases/latest/download/proton-drive-gtk_1.0.0_all.deb
 
 # Install
 sudo dpkg -i proton-drive-gtk_1.0.0_all.deb
+sudo apt-get install -f  # Install dependencies if needed
 ```
 
-**Option B: Install from source**
+**Option B: Install from .rpm package (Fedora/RHEL/openSUSE)**
+
+```bash
+# Download latest release
+wget https://github.com/AchrafSoltani/proton-drive-gtk/releases/latest/download/proton-drive-gtk-1.0.0-1.noarch.rpm
+
+# Install (Fedora/RHEL)
+sudo dnf install proton-drive-gtk-1.0.0-1.noarch.rpm
+
+# Install (openSUSE)
+sudo zypper install proton-drive-gtk-1.0.0-1.noarch.rpm
+```
+
+**Option C: Install from source**
 
 ```bash
 git clone https://github.com/AchrafSoltani/proton-drive-gtk.git
@@ -124,13 +138,19 @@ cd proton-drive-gtk
 ./install.sh
 ```
 
-**Option C: Build .deb from source**
+**Option D: Build packages from source**
 
 ```bash
 git clone https://github.com/AchrafSoltani/proton-drive-gtk.git
 cd proton-drive-gtk
+
+# Build .deb (Debian/Ubuntu)
 ./build-deb.sh
 sudo dpkg -i dist/proton-drive-gtk_1.0.0_all.deb
+
+# Build .rpm (Fedora/RHEL) - requires rpm-build
+./build-rpm.sh
+sudo dnf install dist/proton-drive-gtk-1.0.0-1.noarch.rpm
 ```
 
 ## Usage

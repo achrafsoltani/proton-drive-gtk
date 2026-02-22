@@ -12,6 +12,7 @@ dist/
 build/
 *.egg-info/
 *.deb
+*.rpm
 
 # IDE
 .idea/
