@@ -3,7 +3,7 @@
 
 set -e
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 PACKAGE="proton-drive-gtk"
 ARCH="all"
 
@@ -72,7 +72,8 @@ Description: GTK system tray application for Proton Drive
   - Pause/resume sync
   - Auto-mount on startup
   - Settings dialog for configuration
-  - Nautilus sync status emblems (synced/syncing/pending/error)
+  - Nautilus sync status emblems (synced/syncing/pending/error/cloud/downloading)
+  - Smart Sync: Download Now and Free Up Space context menu actions
 EOF
 
 # Create postinst script

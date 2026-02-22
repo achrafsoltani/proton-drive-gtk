@@ -3,7 +3,7 @@
 
 set -e
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 PACKAGE="proton-drive-gtk"
 RELEASE="1"
 
@@ -67,7 +67,8 @@ powered by rclone. Features include:
 - Pause/resume sync
 - Auto-mount on startup
 - Settings dialog for configuration
-- Nautilus sync status emblems (synced/syncing/pending/error)
+- Nautilus sync status emblems (synced/syncing/pending/error/cloud/downloading)
+- Smart Sync: Download Now and Free Up Space context menu actions
 
 %prep
 %setup -q
@@ -111,6 +112,13 @@ install -m 644 assets/icons/emblems/scalable/*.svg %{buildroot}%{_datadir}/icons
 /usr/bin/gtk-update-icon-cache -f -t %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
+* Sat Feb 22 2026 Achraf Soltani <achraf.soltani@gmail.com> - 1.1.0-1
+- Add cloud-only and downloading status detection
+- Add context menu actions: Download Now, Free Up Space
+- Detect cached vs cloud-only files via VFS cache
+- Track active downloads from rclone core/stats
+- New emblem icons for cloud and downloading states
+
 * Sun Feb 22 2026 Achraf Soltani <achraf.soltani@gmail.com> - 1.0.0-1
 - Initial release
 - System tray with mount/unmount controls
