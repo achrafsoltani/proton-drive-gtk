@@ -34,12 +34,74 @@ curl https://rclone.org/install.sh | sudo bash
 
 ### 3. Configure rclone with Proton Drive
 
+**Important:** You must have logged into Proton Drive via the web browser at least once to generate encryption keys before using rclone.
+
 ```bash
 rclone config
-# Select 'n' for new remote
-# Name it 'protondrive'
-# Select 'protondrive' as storage type
-# Enter your Proton credentials
+```
+
+Follow the interactive prompts:
+
+```
+No remotes found, make a new one?
+n) New remote
+s) Set configuration password
+q) Quit config
+n/s/q> n
+
+Enter name for new remote.
+name> protondrive
+
+Option Storage.
+Type of storage to configure.
+Choose a number from below, or type in your own value.
+...
+XX / Proton Drive
+   \ (protondrive)
+...
+Storage> protondrive
+
+Option username.
+The username of your proton account
+Enter a value.
+username> your.email@proton.me
+
+Option password.
+The password of your proton account.
+y) Yes, type in my own password
+g) Generate random password
+n) No, leave this optional password blank
+y/g/n> y
+Enter the password: [hidden]
+Confirm the password: [hidden]
+
+Option 2fa.
+The 2FA code (if 2FA is enabled on the account)
+Enter a value. Press Enter to leave empty.
+2fa> [enter code or leave blank]
+
+Edit advanced config?
+y) Yes
+n) No (default)
+y/n> n
+
+Configuration complete.
+Options:
+- type: protondrive
+- username: your.email@proton.me
+- password: *** ENCRYPTED ***
+
+Keep this "protondrive" remote?
+y) Yes this is OK (default)
+e) Edit this remote
+d) Delete this remote
+y/e/d> y
+```
+
+Verify the configuration:
+
+```bash
+rclone lsd protondrive:
 ```
 
 ### 4. Clone and install
