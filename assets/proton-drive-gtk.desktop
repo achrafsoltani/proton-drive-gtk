@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Proton Drive
+Comment=Sync your files with Proton Drive
+Exec={{INSTALL_PATH}}/run.sh
+Icon=network-server
+Terminal=false
+Type=Application
+Categories=Network;FileTransfer;
+StartupNotify=false
