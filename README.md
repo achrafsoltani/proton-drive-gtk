@@ -11,12 +11,41 @@ A lightweight GTK system tray application for Proton Drive, powered by rclone.
 - Auto-mount on startup (optional)
 - Open mount folder in file manager
 - Settings dialog for configuration
+- **Nautilus sync status emblems** - Dropbox-style file sync indicators
+
+## Nautilus Sync Status Emblems
+
+Files in your Proton Drive folder display sync status emblems (like Dropbox):
+
+| Emblem | Colour | Status |
+|--------|--------|--------|
+| Checkmark | Green | Synced - file is fully uploaded |
+| Arrows | Purple | Syncing - file is currently uploading |
+| Clock | Orange | Pending - file is queued for upload |
+| X | Red | Error - upload failed after retries |
+
+**Note:** Press F5 in Nautilus to refresh emblems after status changes.
+
+### Enable Nautilus emblems
+
+```bash
+# Install python3-nautilus (if not already installed)
+sudo apt install python3-nautilus  # Debian/Ubuntu
+sudo dnf install nautilus-python   # Fedora
+
+# Copy extension to system directory
+sudo cp /usr/share/proton-drive-gtk/nautilus/proton_drive_nautilus.py /usr/share/nautilus-python/extensions/
+
+# Restart Nautilus
+nautilus -q
+```
 
 ## Requirements
 
 - Python 3.10+
 - GTK 3 / libappindicator
 - rclone 1.61+ (with protondrive support)
+- python3-nautilus (optional, for sync emblems)
 
 ## Installation
 
@@ -177,16 +206,24 @@ Or search "Proton Drive" in your application menu.
 
 ```
 proton-drive-gtk/
-├── install.sh        # Installation script
-├── run.sh            # Run script (backgrounds by default)
+├── install.sh            # Installation script
+├── run.sh                # Run script (backgrounds by default)
+├── build-deb.sh          # Build .deb package
+├── build-rpm.sh          # Build .rpm package
 ├── src/
-│   ├── main.py       # Entry point
-│   ├── tray.py       # System tray implementation
-│   ├── rclone.py     # rclone wrapper
-│   └── config.py     # Settings management
+│   ├── main.py           # Entry point
+│   ├── tray.py           # System tray implementation
+│   ├── rclone.py         # rclone wrapper
+│   ├── config.py         # Settings management
+│   └── nautilus_server.py # Socket server for Nautilus extension
+├── nautilus/
+│   └── proton_drive_nautilus.py  # Nautilus extension
 ├── assets/
-│   └── proton-drive-gtk.desktop
-└── tests/
+│   ├── proton-drive-gtk.desktop
+│   └── icons/
+│       └── emblems/      # Sync status emblem icons
+└── bin/
+    └── proton-drive-gtk  # Launcher script
 ```
 
 ## Configuration
