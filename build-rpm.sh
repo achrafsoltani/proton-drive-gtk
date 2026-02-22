@@ -73,13 +73,10 @@ powered by rclone. Features include:
 mkdir -p %{buildroot}%{_bindir}
 mkdir -p %{buildroot}%{_datadir}/%{name}
 mkdir -p %{buildroot}%{_datadir}/applications
-mkdir -p %{buildroot}%{_docdir}/%{name}
 
 install -m 755 bin/proton-drive-gtk %{buildroot}%{_bindir}/
 install -m 644 src/*.py %{buildroot}%{_datadir}/%{name}/
 install -m 644 assets/proton-drive-gtk.desktop.in %{buildroot}%{_datadir}/applications/proton-drive-gtk.desktop
-install -m 644 README.md %{buildroot}%{_docdir}/%{name}/
-install -m 644 LICENSE %{buildroot}%{_docdir}/%{name}/
 
 %files
 %license LICENSE
@@ -89,7 +86,7 @@ install -m 644 LICENSE %{buildroot}%{_docdir}/%{name}/
 %{_datadir}/applications/proton-drive-gtk.desktop
 
 %changelog
-* Sat Feb 22 2026 Achraf Soltani <achraf.soltani@gmail.com> - 1.0.0-1
+* Sun Feb 22 2026 Achraf Soltani <achraf.soltani@gmail.com> - 1.0.0-1
 - Initial release
 - System tray with mount/unmount controls
 - Transfer rate display
