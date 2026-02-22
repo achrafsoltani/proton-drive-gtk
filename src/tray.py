@@ -8,8 +8,10 @@ from gi.repository import Gtk, GLib, AyatanaAppIndicator3 as AppIndicator
 import subprocess
 import os
 from pathlib import Path
+from typing import Optional
 from rclone import RcloneManager, MountStatus, TransferStats
 from config import Config, get_config
+from nautilus_server import NautilusIntegration
 
 
 class ProtonDriveTray:
@@ -23,6 +25,7 @@ class ProtonDriveTray:
     def __init__(self):
         self.config = get_config()
         self.rclone = RcloneManager(self.config)
+        self._nautilus: Optional[NautilusIntegration] = None
 
         # Create indicator
         self.indicator = AppIndicator.Indicator.new(
@@ -177,9 +180,32 @@ class ProtonDriveTray:
                 return
         self.storage_item.set_label("Storage: --")
 
+    def _start_nautilus_server(self) -> None:
+        """Start the Nautilus integration server."""
+        if self._nautilus is not None:
+            return
+
+        self._nautilus = NautilusIntegration(
+            mount_path=self.config.mount_path,
+            get_vfs_queue_func=self.rclone.get_vfs_queue
+        )
+        if self._nautilus.start():
+            print(f"Nautilus server started at: {self._nautilus.server.socket_path}")
+        else:
+            print("Failed to start Nautilus server")
+            self._nautilus = None
+
+    def _stop_nautilus_server(self) -> None:
+        """Stop the Nautilus integration server."""
+        if self._nautilus is not None:
+            self._nautilus.stop()
+            self._nautilus = None
+            print("Nautilus server stopped")
+
     def _on_mount_toggle(self, widget):
         """Handle mount/unmount toggle."""
         if self.rclone.status in (MountStatus.MOUNTED, MountStatus.PAUSED):
+            self._stop_nautilus_server()
             success, message = self.rclone.unmount()
             if not success:
                 self._show_error("Unmount Failed", message)
@@ -187,6 +213,8 @@ class ProtonDriveTray:
             success, message = self.rclone.mount()
             if not success:
                 self._show_error("Mount Failed", message)
+            else:
+                self._start_nautilus_server()
 
         self._update_status()
 
@@ -246,6 +274,8 @@ class ProtonDriveTray:
 
     def _on_quit(self, widget):
         """Quit the application."""
+        # Stop Nautilus server
+        self._stop_nautilus_server()
         # Unmount before quitting
         if self.rclone.status == MountStatus.MOUNTED:
             self.rclone.unmount()
@@ -281,7 +311,9 @@ class ProtonDriveTray:
 
         # Auto-mount if enabled
         if self.config.auto_mount:
-            self.rclone.mount()
+            success, _ = self.rclone.mount()
+            if success:
+                self._start_nautilus_server()
 
         Gtk.main()
 
