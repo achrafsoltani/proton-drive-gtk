@@ -214,6 +214,17 @@ class RcloneManager:
         """
         return self._rc_command("vfs/queue")
 
+    def get_core_stats(self) -> Optional[dict]:
+        """Get rclone core statistics including active transfers.
+
+        Returns stats data containing:
+        - transferring: List of active transfers (uploads and downloads)
+        - speed: Current transfer speed
+        - bytes: Total bytes transferred
+        - errors: Number of errors
+        """
+        return self._rc_command("core/stats")
+
     def pause(self) -> tuple[bool, str]:
         """Pause all transfers."""
         if not self._is_rc_running():

@@ -15,7 +15,7 @@ if ! command -v rsvg-convert &> /dev/null; then
 fi
 
 SIZES="16 22 24 32 48"
-ICONS="emblem-proton-synced emblem-proton-syncing emblem-proton-pending emblem-proton-error"
+ICONS="emblem-proton-synced emblem-proton-syncing emblem-proton-pending emblem-proton-error emblem-proton-cloud emblem-proton-downloading"
 
 for icon in $ICONS; do
     svg="$EMBLEMS_DIR/scalable/${icon}.svg"

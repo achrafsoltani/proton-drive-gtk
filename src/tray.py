@@ -187,7 +187,9 @@ class ProtonDriveTray:
 
         self._nautilus = NautilusIntegration(
             mount_path=self.config.mount_path,
-            get_vfs_queue_func=self.rclone.get_vfs_queue
+            remote_name=self.config.remote_name,
+            get_vfs_queue_func=self.rclone.get_vfs_queue,
+            get_core_stats_func=self.rclone.get_core_stats
         )
         if self._nautilus.start():
             print(f"Nautilus server started at: {self._nautilus.server.socket_path}")

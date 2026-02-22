@@ -5,23 +5,21 @@ mount folder. It communicates with the proton-drive-gtk application via a
 Unix socket to query file statuses.
 
 Emblem mapping:
-- emblem-proton-synced: File is fully synced (green checkmark)
-- emblem-proton-syncing: File is currently uploading (circular arrows)
-- emblem-proton-pending: File is queued for upload (clock)
+- emblem-proton-synced: File is fully synced/cached locally (green checkmark)
+- emblem-proton-syncing: File is currently uploading (purple circular arrows)
+- emblem-proton-pending: File is queued for upload (orange clock)
 - emblem-proton-error: Upload failed after retries (red X)
+- emblem-proton-cloud: File exists on cloud only, not cached locally (blue cloud)
+- emblem-proton-downloading: File is currently being downloaded (blue down arrow)
 """
 
-import os
 import socket
 import time
 import threading
 from pathlib import Path
 from urllib.parse import unquote
 
-# Import Nautilus - don't require version, let it auto-detect
 from gi.repository import GObject, Nautilus, GLib
-
-print("Initializing proton-drive-gtk Nautilus extension")
 
 # Socket path - must match the server
 SOCKET_PATH = Path.home() / ".cache" / "proton-drive-gtk" / "nautilus.sock"
@@ -39,6 +37,8 @@ EMBLEM_MAP = {
     "syncing": "emblem-proton-syncing",
     "pending": "emblem-proton-pending",
     "error": "emblem-proton-error",
+    "cloud": "emblem-proton-cloud",
+    "downloading": "emblem-proton-downloading",
 }
 
 
@@ -148,16 +148,6 @@ class ProtonDriveInfoProvider(GObject.GObject, Nautilus.InfoProvider):
 
     def __init__(self):
         super().__init__()
-        self._tracked_files = {}  # path -> (file_info, last_status)
-        self._refresh_timeout = None
-        # Start periodic refresh checker
-        GLib.timeout_add_seconds(3, self._check_for_changes)
-
-    def _check_for_changes(self):
-        """Periodically check for status changes (placeholder for future auto-refresh)."""
-        # Auto-refresh not currently working with Nautilus 4.0
-        # Keeping timer infrastructure for potential future improvements
-        return True
 
     def update_file_info(self, file: Nautilus.FileInfo) -> None:
         """Called by Nautilus for each visible file."""
@@ -175,13 +165,6 @@ class ProtonDriveInfoProvider(GObject.GObject, Nautilus.InfoProvider):
 
         # Get status
         status = _get_file_status(file_path)
-
-        # Track this file for auto-refresh (future use)
-        path_key = str(file_path)
-        if status and status != "synced":
-            self._tracked_files[path_key] = status
-        elif path_key in self._tracked_files:
-            del self._tracked_files[path_key]
 
         # Apply emblem
         if status and status in EMBLEM_MAP:

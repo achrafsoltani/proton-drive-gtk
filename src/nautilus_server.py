@@ -16,6 +16,8 @@ class FileStatus(Enum):
     SYNCING = "syncing"
     PENDING = "pending"
     ERROR = "error"
+    CLOUD = "cloud"  # File exists on cloud but not cached locally
+    DOWNLOADING = "downloading"  # File is currently being downloaded
     UNKNOWN = "unknown"
 
 
@@ -29,11 +31,16 @@ class QueuedFile:
 
 
 class SyncStatusCache:
-    """Cache for file sync statuses, parsed from rclone vfs/queue."""
+    """Cache for file sync statuses, parsed from rclone vfs/queue and core/stats."""
 
-    def __init__(self, mount_path: str):
+    # rclone VFS cache directory
+    VFS_CACHE_DIR = Path.home() / ".cache" / "rclone" / "vfs"
+
+    def __init__(self, mount_path: str, remote_name: str = "protondrive"):
         self.mount_path = Path(mount_path).resolve()
-        self._cache: Dict[str, QueuedFile] = {}
+        self.remote_name = remote_name
+        self._upload_cache: Dict[str, QueuedFile] = {}
+        self._downloading: set = set()  # Paths currently downloading
         self._lock = threading.Lock()
         self._last_update = 0.0
 
@@ -55,7 +62,7 @@ class SyncStatusCache:
         }
         """
         with self._lock:
-            self._cache.clear()
+            self._upload_cache.clear()
             self._last_update = time.time()
 
             if not queue_data:
@@ -76,12 +83,56 @@ class SyncStatusCache:
                     else:
                         status = FileStatus.PENDING
 
-                    self._cache[path] = QueuedFile(
+                    self._upload_cache[path] = QueuedFile(
                         path=path,
                         status=status,
                         tries=tries,
                         error=None
                     )
+
+    def update_from_core_stats(self, stats_data: Optional[dict]) -> None:
+        """Update downloading files from rclone core/stats response.
+
+        The transferring array contains active downloads/uploads:
+        {
+            "transferring": [
+                {
+                    "name": "path/to/file.txt",
+                    "srcFs": "protondrive:"  # indicates download from remote
+                }
+            ]
+        }
+        """
+        with self._lock:
+            self._downloading.clear()
+
+            if not stats_data:
+                return
+
+            # Check transferring items for downloads (srcFs = remote)
+            for item in stats_data.get("transferring", []):
+                src_fs = item.get("srcFs", "")
+                # If srcFs is the remote, it's a download
+                if src_fs and src_fs.rstrip(":") == self.remote_name:
+                    name = item.get("name", "")
+                    if name:
+                        path = self._normalize_path(name)
+                        if path:
+                            self._downloading.add(path)
+
+    def _is_file_cached(self, file_path: str) -> bool:
+        """Check if a file is cached locally in the VFS cache."""
+        try:
+            # Convert mount path to cache path
+            # Mount: ~/ProtonDrive/Documents/file.txt
+            # Cache: ~/.cache/rclone/vfs/protondrive/Documents/file.txt
+            file_path_obj = Path(file_path)
+            relative_path = file_path_obj.relative_to(self.mount_path)
+            cache_path = self.VFS_CACHE_DIR / self.remote_name / relative_path
+
+            return cache_path.exists()
+        except (ValueError, OSError):
+            return False
 
     def _normalize_path(self, path: str) -> str:
         """Normalize a file path to absolute mount path."""
@@ -99,9 +150,6 @@ class SyncStatusCache:
             # Normalise the path for comparison
             normalised = str(Path(file_path).resolve())
 
-            if normalised in self._cache:
-                return self._cache[normalised].status
-
             # Check if it's within the mount path
             try:
                 Path(normalised).relative_to(self.mount_path)
@@ -109,7 +157,15 @@ class SyncStatusCache:
                 # Not in mount path
                 return FileStatus.UNKNOWN
 
-            # Check if file was recently modified (likely pending upload)
+            # 1. Check if currently downloading
+            if normalised in self._downloading:
+                return FileStatus.DOWNLOADING
+
+            # 2. Check upload queue (syncing/pending/error)
+            if normalised in self._upload_cache:
+                return self._upload_cache[normalised].status
+
+            # 3. Check if file was recently modified (likely pending upload)
             try:
                 file_path_obj = Path(normalised)
                 if file_path_obj.exists():
@@ -121,13 +177,21 @@ class SyncStatusCache:
             except (OSError, IOError):
                 pass
 
-            # If not in queue and within mount, it's synced
-            return FileStatus.SYNCED
+            # 4. Check if file is cached locally
+            if self._is_file_cached(normalised):
+                return FileStatus.SYNCED
+
+            # 5. File exists on mount but not cached = cloud-only
+            return FileStatus.CLOUD
 
     def get_all_statuses(self) -> Dict[str, FileStatus]:
-        """Get all file statuses in the cache."""
+        """Get all file statuses in the cache (uploads and downloads)."""
         with self._lock:
-            return {path: qf.status for path, qf in self._cache.items()}
+            result = {path: qf.status for path, qf in self._upload_cache.items()}
+            # Add downloading files
+            for path in self._downloading:
+                result[path] = FileStatus.DOWNLOADING
+            return result
 
 
 class NautilusSocketServer:
@@ -300,16 +364,25 @@ class NautilusSocketServer:
 class NautilusIntegration:
     """Main integration class combining cache and server."""
 
-    def __init__(self, mount_path: str, get_vfs_queue_func: Callable[[], Optional[dict]]):
+    def __init__(
+        self,
+        mount_path: str,
+        remote_name: str,
+        get_vfs_queue_func: Callable[[], Optional[dict]],
+        get_core_stats_func: Callable[[], Optional[dict]]
+    ):
         """Initialise Nautilus integration.
 
         Args:
             mount_path: Path where Proton Drive is mounted
+            remote_name: Name of the rclone remote (e.g., "protondrive")
             get_vfs_queue_func: Callable that returns rclone vfs/queue data
+            get_core_stats_func: Callable that returns rclone core/stats data
         """
         self.mount_path = mount_path
         self._get_vfs_queue = get_vfs_queue_func
-        self.cache = SyncStatusCache(mount_path)
+        self._get_core_stats = get_core_stats_func
+        self.cache = SyncStatusCache(mount_path, remote_name)
         self.server = NautilusSocketServer(self.cache)
         self._update_thread: Optional[threading.Thread] = None
         self._running = False
@@ -338,6 +411,9 @@ class NautilusIntegration:
         """Manually trigger a cache update."""
         queue_data = self._get_vfs_queue()
         self.cache.update_from_vfs_queue(queue_data)
+
+        stats_data = self._get_core_stats()
+        self.cache.update_from_core_stats(stats_data)
 
     def _update_loop(self) -> None:
         """Background loop to update cache periodically."""

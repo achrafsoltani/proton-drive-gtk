@@ -19,10 +19,12 @@ Files in your Proton Drive folder display sync status emblems (like Dropbox):
 
 | Emblem | Colour | Status |
 |--------|--------|--------|
-| Checkmark | Green | Synced - file is fully uploaded |
+| Checkmark | Green | Synced - file is cached locally |
 | Arrows | Purple | Syncing - file is currently uploading |
 | Clock | Orange | Pending - file is queued for upload |
 | X | Red | Error - upload failed after retries |
+| Cloud | Blue | Cloud-only - file exists on cloud, not cached locally |
+| Down Arrow | Blue | Downloading - file is currently being downloaded |
 
 **Note:** Press F5 in Nautilus to refresh emblems after status changes.
 

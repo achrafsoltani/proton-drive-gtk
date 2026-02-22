@@ -62,11 +62,7 @@ if python3 -c "from gi.repository import Nautilus" 2>/dev/null; then
     mkdir -p "$NAUTILUS_EXT_DIR"
     cp "$SCRIPT_DIR/nautilus/proton_drive_nautilus.py" "$NAUTILUS_EXT_DIR/"
     echo "Nautilus extension installed to: $NAUTILUS_EXT_DIR"
-    echo ""
-    echo "If emblems don't appear, install system-wide with:"
-    echo "  sudo cp $SCRIPT_DIR/nautilus/proton_drive_nautilus.py /usr/share/nautilus-python/extensions/"
-    echo ""
-    echo "Then restart Nautilus: nautilus -q"
+    echo "Restart Nautilus to activate: nautilus -q"
 else
     echo "Warning: python3-nautilus not found. Nautilus extension not installed."
     echo "Install with: sudo apt install python3-nautilus"
