@@ -28,14 +28,23 @@ Files in your Proton Drive folder display sync status emblems (like Dropbox):
 
 **Note:** Press F5 in Nautilus to refresh emblems after status changes.
 
-### Enable Nautilus emblems
+### Context Menu Actions
+
+Right-click on files in your Proton Drive folder for these options:
+
+| Action | Description |
+|--------|-------------|
+| **Download Now** | Download cloud-only files to local cache |
+| **Free Up Space** | Remove local cache, keeping file on cloud only |
+
+### Enable Nautilus extension
 
 ```bash
 # Install python3-nautilus (if not already installed)
 sudo apt install python3-nautilus  # Debian/Ubuntu
 sudo dnf install nautilus-python   # Fedora
 
-# Copy extension to system directory
+# Copy extension to user directory
 sudo cp /usr/share/proton-drive-gtk/nautilus/proton_drive_nautilus.py /usr/share/nautilus-python/extensions/
 
 # Restart Nautilus
