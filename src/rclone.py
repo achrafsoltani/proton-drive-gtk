@@ -47,7 +47,7 @@ class TransferStats:
 
     @property
     def is_transferring(self) -> bool:
-        return self.transferring > 0 or self.speed > 0
+        return self.transferring > 0
 
 
 class RcloneManager:
@@ -181,14 +181,38 @@ class RcloneManager:
 
         data = self._rc_command("core/stats")
         if data:
-            stats.speed = data.get("speed", 0)
             stats.bytes_transferred = data.get("bytes", 0)
             stats.errors = data.get("errors", 0)
+
+            # Check for active transfers in core/stats
             transferring = data.get("transferring")
             if transferring:
                 stats.transferring = len(transferring)
+                stats.speed = data.get("speed", 0)
+            else:
+                # Also check vfs/queue for pending uploads
+                queue_data = self.get_vfs_queue()
+                if queue_data:
+                    queue = queue_data.get("queue", [])
+                    uploading = [item for item in queue if item.get("uploading")]
+                    if uploading:
+                        stats.transferring = len(uploading)
+                        stats.speed = data.get("speed", 0)
+                    elif queue:
+                        # Items queued but not actively uploading
+                        stats.transferring = len(queue)
 
         return stats
+
+    def get_vfs_queue(self) -> Optional[dict]:
+        """Get the VFS upload queue status.
+
+        Returns the queue data containing:
+        - uploads: Currently uploading files
+        - uploadsWaiting: Files waiting to upload
+        - uploadsQueued: Files queued for upload
+        """
+        return self._rc_command("vfs/queue")
 
     def pause(self) -> tuple[bool, str]:
         """Pause all transfers."""
