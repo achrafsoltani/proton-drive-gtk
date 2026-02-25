@@ -28,8 +28,18 @@ for size in $SIZES; do
 done
 mkdir -p "$BUILD_DIR/usr/share/icons/hicolor/scalable/emblems"
 
-# Copy source files
+# Copy source files (including subdirectories)
 cp "$SCRIPT_DIR/src/"*.py "$BUILD_DIR/usr/share/proton-drive-gtk/"
+
+# Copy daemon module
+mkdir -p "$BUILD_DIR/usr/share/proton-drive-gtk/daemon"
+cp "$SCRIPT_DIR/src/daemon/"*.py "$BUILD_DIR/usr/share/proton-drive-gtk/daemon/"
+
+# Copy utils module if it exists
+if [ -d "$SCRIPT_DIR/src/utils" ]; then
+    mkdir -p "$BUILD_DIR/usr/share/proton-drive-gtk/utils"
+    cp "$SCRIPT_DIR/src/utils/"*.py "$BUILD_DIR/usr/share/proton-drive-gtk/utils/" 2>/dev/null || true
+fi
 
 # Copy Nautilus extension
 cp "$SCRIPT_DIR/nautilus/proton_drive_nautilus.py" "$BUILD_DIR/usr/share/nautilus-python/extensions/"
@@ -60,7 +70,7 @@ Version: ${VERSION}
 Section: net
 Priority: optional
 Architecture: ${ARCH}
-Depends: python3, python3-gi, gir1.2-ayatanaappindicator3-0.1, rclone (>= 1.61)
+Depends: python3, python3-gi, gir1.2-ayatanaappindicator3-0.1, rclone (>= 1.61), python3-pip
 Recommends: python3-nautilus
 Maintainer: Achraf Soltani <achraf.soltani@gmail.com>
 Homepage: https://github.com/achrafsoltani/proton-drive-gtk
@@ -91,6 +101,12 @@ if command -v gtk-update-icon-cache &> /dev/null; then
     gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 fi
 
+# Install inotify for real-time file watching
+if ! python3 -c "import inotify" 2>/dev/null; then
+    echo "Installing inotify for real-time file watching..."
+    pip3 install --quiet inotify 2>/dev/null || true
+fi
+
 echo ""
 echo "Proton Drive GTK installed successfully!"
 echo ""
@@ -98,6 +114,8 @@ echo "Before using, configure rclone with your Proton account:"
 echo "  rclone config"
 echo ""
 echo "Then run: proton-drive-gtk"
+echo ""
+echo "To start automatically on login, enable it in Preferences."
 echo ""
 echo "Note: For Nautilus sync emblems, install python3-nautilus and restart Nautilus:"
 echo "  sudo apt install python3-nautilus"

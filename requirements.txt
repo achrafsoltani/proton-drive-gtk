@@ -2,4 +2,6 @@
 # sudo apt install python3-gi gir1.2-ayatanaappindicator3-0.1
 #
 # The venv uses --system-site-packages to access these.
-# No pip packages required currently.
+
+# For real-time file watching (optional but recommended)
+inotify
