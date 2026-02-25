@@ -612,28 +612,22 @@ class StateDatabase:
         conn.commit()
 
     def seed_cache_from_history(self, local_path: str) -> int:
-        """Seed the remote files cache from successful download history.
+        """Seed the downloaded status from successful download history.
 
-        This allows recovering the file list from sync_history when the
-        remote_files cache is empty but downloads have been completed.
-        Uses local file metadata since the files are already downloaded.
+        This allows recovering which files have been downloaded when the
+        sync_session is reset. Does NOT mark listing as complete - a fresh
+        remote listing is still required to discover new files.
 
         Args:
             local_path: The local sync directory path (to strip from paths)
 
         Returns:
-            Number of files seeded into cache
+            Number of files marked as downloaded
         """
-        import os
         from pathlib import Path
 
         conn = self._get_connection()
         cursor = conn.cursor()
-
-        # Check if cache already has files
-        cursor.execute("SELECT COUNT(*) as cnt FROM remote_files")
-        if cursor.fetchone()['cnt'] > 0:
-            return 0  # Cache already populated
 
         # Get all successful downloads from history
         cursor.execute("""
@@ -645,7 +639,7 @@ class StateDatabase:
         if not rows:
             return 0
 
-        # Convert absolute paths to relative paths and get local file metadata
+        # Store downloaded paths for later matching after remote listing
         local_prefix = local_path.rstrip('/') + '/'
         seeded = 0
 
@@ -655,29 +649,26 @@ class StateDatabase:
                 rel_path = abs_path[len(local_prefix):]
                 local_file = Path(abs_path)
 
-                # Get file metadata from local file
-                size = 0
-                mod_time = 0.0
-                name = local_file.name
+                # Only count if file still exists locally
                 if local_file.exists():
+                    # Pre-populate remote_files with downloaded=1
+                    # These will be updated when actual remote listing happens
                     try:
                         stat = local_file.stat()
-                        size = stat.st_size
-                        mod_time = stat.st_mtime
+                        cursor.execute("""
+                            INSERT OR REPLACE INTO remote_files (path, name, size, mod_time, downloaded)
+                            VALUES (?, ?, ?, ?, 1)
+                        """, (rel_path, local_file.name, stat.st_size, stat.st_mtime))
+                        seeded += 1
                     except OSError:
                         pass
 
-                cursor.execute("""
-                    INSERT OR IGNORE INTO remote_files (path, name, size, mod_time, downloaded)
-                    VALUES (?, ?, ?, ?, 1)
-                """, (rel_path, name, size, mod_time))
-                seeded += 1
-
         if seeded > 0:
-            # Mark listing as complete since we have downloaded files
+            # Do NOT mark listing_complete - we still need fresh remote listing
+            # Just track how many files we know are downloaded
             cursor.execute("""
                 INSERT OR REPLACE INTO sync_session (id, listing_complete, listing_timestamp, total_files, downloaded_files)
-                VALUES (1, 1, ?, ?, ?)
+                VALUES (1, 0, ?, ?, ?)
             """, (time.time(), seeded, seeded))
             conn.commit()
 
