@@ -113,13 +113,35 @@ class ProtonDriveTray:
         status = self.rclone.status
 
         if status == MountStatus.MOUNTED:
-            # Check transfer stats
+            # Start Nautilus server if not already running
+            if self._nautilus is None:
+                self._start_nautilus_server()
+            # Check transfer stats from rclone
             stats = self.rclone.get_transfer_stats()
+
+            # Check Nautilus download progress
+            download_progress = None
+            if self._nautilus:
+                download_progress = self._nautilus.get_download_progress()
 
             if stats.is_transferring:
                 self.indicator.set_icon_full(self.ICON_SYNCING, "Syncing")
                 self.status_item.set_label(f"Status: Syncing ({stats.transferring} transfers)")
                 self.transfer_item.set_label(f"Speed: {stats.speed_human}")
+                self.transfer_item.set_visible(True)
+            elif download_progress:
+                total, cached, count = download_progress
+                self.indicator.set_icon_full(self.ICON_SYNCING, "Downloading")
+                self.status_item.set_label(f"Status: Downloading ({count} items)")
+                # Show progress
+                if total > 0:
+                    percent = (cached / total * 100)
+                    cached_mb = cached / (1024 * 1024)
+                    total_mb = total / (1024 * 1024)
+                    self.transfer_item.set_label(f"Progress: {cached_mb:.1f} / {total_mb:.1f} MB ({percent:.0f}%)")
+                else:
+                    cached_mb = cached / (1024 * 1024)
+                    self.transfer_item.set_label(f"Downloaded: {cached_mb:.1f} MB")
                 self.transfer_item.set_visible(True)
             else:
                 self.indicator.set_icon_full(self.ICON_MOUNTED, "Mounted")
