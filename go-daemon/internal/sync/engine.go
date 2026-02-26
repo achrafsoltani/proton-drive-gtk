@@ -83,7 +83,10 @@ type Engine struct {
 }
 
 // NewEngine creates a new sync engine.
-func NewEngine(localPath, remoteName string, stateDB *db.StateDB, w *watcher.Watcher, logger *slog.Logger) *Engine {
+func NewEngine(localPath, remoteName string, stateDB *db.StateDB, w *watcher.Watcher, logger *slog.Logger, maxTransfers int) *Engine {
+	if maxTransfers < 1 {
+		maxTransfers = 4
+	}
 	return &Engine{
 		localPath:    localPath,
 		remoteName:   remoteName,
@@ -93,7 +96,7 @@ func NewEngine(localPath, remoteName string, stateDB *db.StateDB, w *watcher.Wat
 		logger:       logger,
 		status:       StatusStopped,
 		syncInterval: 60 * time.Second,
-		downloadSem:  make(chan struct{}, 4), // Limit to 4 concurrent downloads
+		downloadSem:  make(chan struct{}, maxTransfers),
 	}
 }
 
