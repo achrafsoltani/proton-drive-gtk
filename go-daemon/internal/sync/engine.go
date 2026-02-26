@@ -75,6 +75,11 @@ type Engine struct {
 	syncInterval time.Duration
 	syncTimer    *time.Timer
 	syncMu       sync.Mutex
+
+	// Concurrency control
+	syncRunning   atomic.Bool        // Prevents concurrent Sync() calls
+	downloadSem   chan struct{}      // Limits concurrent downloads
+	activeDownloads sync.Map         // Tracks files being downloaded (to ignore watcher events)
 }
 
 // NewEngine creates a new sync engine.
@@ -88,6 +93,7 @@ func NewEngine(localPath, remoteName string, stateDB *db.StateDB, w *watcher.Wat
 		logger:       logger,
 		status:       StatusStopped,
 		syncInterval: 60 * time.Second,
+		downloadSem:  make(chan struct{}, 4), // Limit to 4 concurrent downloads
 	}
 }
 
@@ -170,6 +176,13 @@ func (e *Engine) Sync(ctx context.Context) error {
 	if e.IsPaused() {
 		return nil
 	}
+
+	// Prevent concurrent sync runs
+	if !e.syncRunning.CompareAndSwap(false, true) {
+		e.logger.Debug("sync already running, skipping")
+		return nil
+	}
+	defer e.syncRunning.Store(false)
 
 	e.setStatus(StatusSyncing)
 	defer e.setStatus(StatusRunning)
@@ -364,42 +377,63 @@ func (e *Engine) downloadFiles(ctx context.Context, files []*db.RemoteFile) erro
 	e.downloadTotal.Store(int32(len(files)))
 	e.downloadDone.Store(0)
 
+	// Use a WaitGroup to track all downloads
+	var wg sync.WaitGroup
+
 	for _, rf := range files {
 		if e.IsPaused() {
-			return nil
+			break
 		}
 
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			break
 		default:
 		}
 
-		localPath := filepath.Join(e.localPath, rf.Path)
-		e.setCurrentFile(rf.Path)
-
-		// Create parent directory
-		if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
-			e.logger.Error("failed to create directory", "path", localPath, "error", err)
-			continue
+		// Acquire semaphore (limit concurrent downloads)
+		select {
+		case e.downloadSem <- struct{}{}:
+		case <-ctx.Done():
+			break
 		}
 
-		// Download
-		if err := e.rclone.Download(ctx, rf.Path, localPath); err != nil {
-			e.logger.Error("download failed", "path", rf.Path, "error", err)
-			e.db.AddSyncHistory("download", localPath, "failed")
-			continue
-		}
+		wg.Add(1)
+		go func(rf *db.RemoteFile) {
+			defer wg.Done()
+			defer func() { <-e.downloadSem }() // Release semaphore
 
-		// Mark as downloaded
-		e.db.MarkRemoteFileDownloaded(rf.Path)
-		e.db.MarkSynced(rf.Path, rf.ModTime, rf.Size)
-		e.db.AddSyncHistory("download", localPath, "success")
+			localPath := filepath.Join(e.localPath, rf.Path)
+			e.setCurrentFile(rf.Path)
 
-		e.downloadDone.Add(1)
-		e.logger.Debug("downloaded", "path", rf.Path)
+			// Track this download to ignore file watcher events
+			e.activeDownloads.Store(localPath, true)
+			defer e.activeDownloads.Delete(localPath)
+
+			// Create parent directory
+			if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+				e.logger.Error("failed to create directory", "path", localPath, "error", err)
+				return
+			}
+
+			// Download
+			if err := e.rclone.Download(ctx, rf.Path, localPath); err != nil {
+				e.logger.Error("download failed", "path", rf.Path, "error", err)
+				e.db.AddSyncHistory("download", localPath, "failed")
+				return
+			}
+
+			// Mark as downloaded
+			e.db.MarkRemoteFileDownloaded(rf.Path)
+			e.db.MarkSynced(rf.Path, rf.ModTime, rf.Size)
+			e.db.AddSyncHistory("download", localPath, "success")
+
+			e.downloadDone.Add(1)
+			e.logger.Debug("downloaded", "path", rf.Path)
+		}(rf)
 	}
 
+	wg.Wait()
 	e.setCurrentFile("")
 	return nil
 }
@@ -481,12 +515,19 @@ func (e *Engine) handleFileEvents(ctx context.Context) {
 			if !ok {
 				return
 			}
+
+			// Ignore events for files we're actively downloading
+			if _, downloading := e.activeDownloads.Load(event.Path); downloading {
+				e.logger.Debug("ignoring event for active download", "path", event.Path)
+				continue
+			}
+
 			e.logger.Debug("file event", "path", event.Path, "type", event.Type)
 			pendingSync = true
 			debounce.Reset(2 * time.Second)
 
 		case <-debounce.C:
-			if pendingSync {
+			if pendingSync && !e.syncRunning.Load() {
 				pendingSync = false
 				go func() {
 					if err := e.Sync(ctx); err != nil {
