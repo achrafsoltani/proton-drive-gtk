@@ -225,6 +225,45 @@ func (s *StateDB) SaveRemoteFile(rf *RemoteFile) error {
 	return err
 }
 
+// SaveRemoteFilesBatch saves multiple remote files in a single transaction.
+func (s *StateDB) SaveRemoteFilesBatch(files []*RemoteFile) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO remote_files (path, name, size, mod_time, mime_type, file_id, downloaded)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(path) DO UPDATE SET
+			name = excluded.name,
+			size = excluded.size,
+			mod_time = excluded.mod_time,
+			mime_type = excluded.mime_type,
+			file_id = excluded.file_id
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, rf := range files {
+		downloaded := 0
+		if rf.Downloaded {
+			downloaded = 1
+		}
+		if _, err := stmt.Exec(rf.Path, rf.Name, rf.Size, rf.ModTime, rf.MimeType, rf.FileID, downloaded); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
 // MarkRemoteFileDownloaded marks a remote file as downloaded.
 func (s *StateDB) MarkRemoteFileDownloaded(path string) error {
 	s.writeMu.Lock()
