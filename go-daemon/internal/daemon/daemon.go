@@ -58,7 +58,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*Daemon, error) {
 	}
 
 	// Create sync engine
-	engine := sync.NewEngine(cfg.LocalPath, cfg.RemoteName, stateDB, w, logger)
+	engine := sync.NewEngine(cfg.LocalPath, cfg.RemoteName, stateDB, w, logger, cfg.MaxConcurrentTransfers)
 
 	// Create IPC server
 	ipcServer, err := ipc.NewServer(paths.SocketPath, engine, logger)
