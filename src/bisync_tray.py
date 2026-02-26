@@ -456,31 +456,58 @@ class BisyncTray:
             return self._update_status_light_python()
 
     def _update_status_light_go(self) -> bool:
-        """Lightweight status update for Go daemon."""
+        """Lightweight status update for Go daemon - updates icon AND menu labels."""
         if not self.daemon_client:
             self.indicator.set_icon_full(self.ICON_IDLE, "Not running")
+            self.status_item.set_label("Not running")
             return True
 
         try:
             stats = self.daemon_client.get_stats()
         except Exception:
             self.indicator.set_icon_full(self.ICON_ERROR, "Connection lost")
+            self.status_item.set_label("Daemon not responding")
             return True
 
+        # Update storage info
+        if stats.total_files > 0:
+            self.storage_item.set_label(f"    {stats.synced_files:,} of {stats.total_files:,} files synced")
+
+        # Update icon and status label
         status = stats.status.lower()
         if status == "syncing":
             self.indicator.set_icon_full(self.ICON_SYNCING, "Syncing")
+            if stats.is_listing:
+                self.status_item.set_label("Indexing files...")
+            elif stats.is_downloading:
+                pct = int(100 * stats.download_done / stats.download_total) if stats.download_total > 0 else 0
+                self.status_item.set_label(f"Downloading {pct}%")
+            elif stats.is_uploading:
+                pct = int(100 * stats.upload_done / stats.upload_total) if stats.upload_total > 0 else 0
+                self.status_item.set_label(f"Uploading {pct}%")
+            else:
+                self.status_item.set_label("Syncing...")
         elif status == "paused":
             self.indicator.set_icon_full(self.ICON_PAUSED, "Paused")
+            self.status_item.set_label("Syncing paused")
         elif status == "error":
             self.indicator.set_icon_full(self.ICON_ERROR, "Error")
+            self.status_item.set_label("Sync error")
         elif status == "running":
             if stats.pending_upload > 0 or stats.pending_download > 0:
                 self.indicator.set_icon_full(self.ICON_SYNCING, "Pending")
+                self.status_item.set_label(f"Syncing {stats.pending_upload + stats.pending_download} items...")
             else:
                 self.indicator.set_icon_full(self.ICON_SYNCED, "Up to date")
+                self.status_item.set_label("Up to date")
         else:
             self.indicator.set_icon_full(self.ICON_IDLE, "Starting")
+            self.status_item.set_label("Starting...")
+
+        # Update errors visibility
+        self.errors_item.set_visible(stats.errors > 0)
+        if stats.errors > 0:
+            self.errors_item.set_label(f"View Errors ({stats.errors})...")
 
         return True
 
@@ -512,7 +539,8 @@ class BisyncTray:
     def _on_menu_show(self, menu):
         """Called when menu is about to be shown - do full status update."""
         # Run full status update (but not recent files - that's on submenu show)
-        self._update_status()
+        # Use idle_add to ensure it runs on GTK main thread
+        GLib.idle_add(self._update_status)
 
     def _update_recent_files(self):
         """Update the recently changed files submenu (called on submenu show)."""
@@ -820,6 +848,13 @@ class BisyncTray:
 
     def _start_go_daemon(self) -> bool:
         """Start the Go sync daemon."""
+        # First check if a daemon is already running
+        self.daemon_client = DaemonClient()
+        if self.daemon_client.is_running():
+            print("Connected to existing Go daemon")
+            self._start_nautilus_server()
+            return True
+
         # Find the Go daemon binary (check multiple locations)
         daemon_bin = None
         for path in [GO_DAEMON_BINARY, GO_DAEMON_INSTALLED, GO_DAEMON_LOCAL]:
@@ -843,10 +878,7 @@ class BisyncTray:
 
             # Wait a moment for daemon to start
             import time
-            time.sleep(1)
-
-            # Create client to communicate with daemon
-            self.daemon_client = DaemonClient()
+            time.sleep(2)  # Wait longer for initialization
 
             # Check if daemon is running
             if not self.daemon_client.is_running():
