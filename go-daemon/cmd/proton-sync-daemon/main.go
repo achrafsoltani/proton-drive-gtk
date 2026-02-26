@@ -19,10 +19,11 @@ var (
 
 func main() {
 	var (
-		showVersion = flag.Bool("version", false, "Show version")
-		debug       = flag.Bool("debug", false, "Enable debug logging")
-		localPath   = flag.String("local", "", "Local sync path (overrides config)")
-		remoteName  = flag.String("remote", "", "Remote name (overrides config)")
+		showVersion    = flag.Bool("version", false, "Show version")
+		debug          = flag.Bool("debug", false, "Enable debug logging")
+		localPath      = flag.String("local", "", "Local sync path (overrides config)")
+		remoteName     = flag.String("remote", "", "Remote name (overrides config)")
+		maxTransfers   = flag.Int("max-transfers", 4, "Max concurrent uploads/downloads")
 	)
 	flag.Parse()
 
@@ -54,6 +55,9 @@ func main() {
 	}
 	if *remoteName != "" {
 		cfg.RemoteName = *remoteName
+	}
+	if *maxTransfers > 0 {
+		cfg.MaxConcurrentTransfers = *maxTransfers
 	}
 
 	// Check rclone
