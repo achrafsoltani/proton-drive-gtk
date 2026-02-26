@@ -869,12 +869,16 @@ class BisyncTray:
 
         # Start the Go daemon process
         try:
+            cmd = [
+                str(daemon_bin),
+                f"--max-transfers={self.config.max_concurrent_transfers}",
+            ]
             self.daemon_process = subprocess.Popen(
-                [str(daemon_bin)],
+                cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            print(f"Started Go daemon (PID: {self.daemon_process.pid})")
+            print(f"Started Go daemon (PID: {self.daemon_process.pid}, max-transfers={self.config.max_concurrent_transfers})")
 
             # Wait a moment for daemon to start
             import time
@@ -1096,6 +1100,19 @@ class BisyncSettingsDialog(Gtk.Dialog):
         conflict_box.pack_start(self.conflict_combo, False, False, 0)
         box.pack_start(conflict_box, False, False, 0)
 
+        # Max concurrent transfers
+        transfers_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        transfers_label = Gtk.Label(label="Max transfers:")
+        transfers_label.set_xalign(0)
+        transfers_label.set_size_request(120, -1)
+        self.transfers_spin = Gtk.SpinButton.new_with_range(1, 16, 1)
+        self.transfers_spin.set_value(config.max_concurrent_transfers)
+        transfers_suffix = Gtk.Label(label="concurrent")
+        transfers_box.pack_start(transfers_label, False, False, 0)
+        transfers_box.pack_start(self.transfers_spin, False, False, 0)
+        transfers_box.pack_start(transfers_suffix, False, False, 0)
+        box.pack_start(transfers_box, False, False, 0)
+
         box.pack_start(Gtk.Separator(), False, False, 5)
 
         # Notifications
@@ -1177,6 +1194,7 @@ X-GNOME-Autostart-enabled=true
         self.config.sync_interval = int(self.interval_spin.get_value())
         self.config.conflict_resolution = self.conflict_combo.get_active_id()
         self.config.show_notifications = self.notifications_check.get_active()
+        self.config.max_concurrent_transfers = int(self.transfers_spin.get_value())
 
         # Handle autostart
         start_on_login = self.start_login_check.get_active()
