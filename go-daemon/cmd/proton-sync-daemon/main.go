@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -56,7 +57,7 @@ func main() {
 	}
 
 	// Check rclone
-	version, err := rclone.GetVersion(nil)
+	version, err := rclone.GetVersion(context.Background())
 	if err != nil {
 		logger.Error("rclone not found", "error", err)
 		fmt.Fprintln(os.Stderr, "Error: rclone is required but not installed.")

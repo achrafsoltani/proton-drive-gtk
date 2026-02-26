@@ -58,6 +58,7 @@ type Watcher struct {
 	pendingMu    sync.Mutex
 	pending      map[string]*pendingEvent
 	debounceStop chan struct{}
+	stopOnce     sync.Once
 }
 
 type pendingEvent struct {
@@ -112,7 +113,9 @@ func (w *Watcher) Start(ctx context.Context) error {
 
 // Stop stops the watcher.
 func (w *Watcher) Stop() error {
-	close(w.debounceStop)
+	w.stopOnce.Do(func() {
+		close(w.debounceStop)
+	})
 	return w.watcher.Close()
 }
 
