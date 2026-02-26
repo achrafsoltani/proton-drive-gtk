@@ -9,12 +9,13 @@ import (
 
 // Config holds the daemon configuration.
 type Config struct {
-	RemoteName         string `json:"remote_name"`
-	LocalPath          string `json:"mount_path"`
-	SyncInterval       int    `json:"sync_interval"`
-	ConflictResolution string `json:"conflict_resolution"`
-	ShowNotifications  bool   `json:"show_notifications"`
-	StartOnLogin       bool   `json:"start_on_login"`
+	RemoteName             string `json:"remote_name"`
+	LocalPath              string `json:"mount_path"`
+	SyncInterval           int    `json:"sync_interval"`
+	ConflictResolution     string `json:"conflict_resolution"`
+	ShowNotifications      bool   `json:"show_notifications"`
+	StartOnLogin           bool   `json:"start_on_login"`
+	MaxConcurrentTransfers int    `json:"max_concurrent_transfers"`
 }
 
 // Paths returns common paths used by the daemon.
@@ -30,12 +31,13 @@ type Paths struct {
 func DefaultConfig() *Config {
 	home, _ := os.UserHomeDir()
 	return &Config{
-		RemoteName:         "protondrive",
-		LocalPath:          filepath.Join(home, "ProtonDrive"),
-		SyncInterval:       60,
-		ConflictResolution: "newer",
-		ShowNotifications:  true,
-		StartOnLogin:       false,
+		RemoteName:             "protondrive",
+		LocalPath:              filepath.Join(home, "ProtonDrive"),
+		SyncInterval:           60,
+		ConflictResolution:     "newer",
+		ShowNotifications:      true,
+		StartOnLogin:           false,
+		MaxConcurrentTransfers: 4,
 	}
 }
 
