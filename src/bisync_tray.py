@@ -321,38 +321,42 @@ class BisyncTray:
         else:
             self.storage_item.set_label("    Calculating...")
 
-        # Map Go daemon status to icons
+        # Activity flags take priority over status string — they reflect
+        # real-time daemon state and avoid "Up to date" during active work.
         status = stats.status.lower()
-        if status == "syncing":
+
+        if stats.is_listing:
+            self.indicator.set_icon_full(self.ICON_SYNCING, "Indexing")
+            self.pause_item.set_label("Pause Syncing")
+            self.status_item.set_label("Indexing files...")
+        elif stats.is_downloading:
+            self.indicator.set_icon_full(self.ICON_SYNCING, "Downloading")
+            self.pause_item.set_label("Pause Syncing")
+            pct = int(100 * stats.download_done / stats.download_total) if stats.download_total > 0 else 0
+            eta_str = f" ({self._format_eta(stats.eta_seconds)})" if stats.eta_seconds else ""
+            self.status_item.set_label(f"Downloading {pct}%{eta_str}")
+        elif stats.is_uploading:
+            self.indicator.set_icon_full(self.ICON_SYNCING, "Uploading")
+            self.pause_item.set_label("Pause Syncing")
+            pct = int(100 * stats.upload_done / stats.upload_total) if stats.upload_total > 0 else 0
+            eta_str = f" ({self._format_eta(stats.eta_seconds)})" if stats.eta_seconds else ""
+            self.status_item.set_label(f"Uploading {pct}%{eta_str}")
+        elif status == "syncing":
             self.indicator.set_icon_full(self.ICON_SYNCING, "Syncing")
             self.pause_item.set_label("Pause Syncing")
-
-            if stats.is_listing:
-                self.status_item.set_label("Indexing files...")
-            elif stats.is_downloading:
-                pct = int(100 * stats.download_done / stats.download_total) if stats.download_total > 0 else 0
-                eta_str = f" ({self._format_eta(stats.eta_seconds)})" if stats.eta_seconds else ""
-                self.status_item.set_label(f"Downloading {pct}%{eta_str}")
-            elif stats.is_uploading:
-                pct = int(100 * stats.upload_done / stats.upload_total) if stats.upload_total > 0 else 0
-                eta_str = f" ({self._format_eta(stats.eta_seconds)})" if stats.eta_seconds else ""
-                self.status_item.set_label(f"Uploading {pct}%{eta_str}")
-            elif stats.current_file:
+            if stats.current_file:
                 filename = os.path.basename(stats.current_file)
                 self.status_item.set_label(f"Syncing {filename[:30]}...")
             else:
                 self.status_item.set_label("Syncing...")
-
         elif status == "paused":
             self.indicator.set_icon_full(self.ICON_PAUSED, "Paused")
             self.status_item.set_label("Syncing paused")
             self.pause_item.set_label("Resume Syncing")
-
         elif status == "error":
             self.indicator.set_icon_full(self.ICON_ERROR, "Error")
             self.status_item.set_label("Sync error")
             self.pause_item.set_label("Pause Syncing")
-
         elif status == "running":
             self.pause_item.set_label("Pause Syncing")
             if stats.pending_upload > 0 or stats.pending_download > 0:
@@ -361,7 +365,6 @@ class BisyncTray:
             else:
                 self.indicator.set_icon_full(self.ICON_SYNCED, "Up to date")
                 self.status_item.set_label("Up to date")
-
         else:
             self.indicator.set_icon_full(self.ICON_IDLE, "Starting")
             self.status_item.set_label("Starting...")
@@ -390,39 +393,41 @@ class BisyncTray:
         else:
             self.storage_item.set_label("    Calculating...")
 
-        # Update icon and status based on daemon state
-        if stats.status == DaemonStatus.SYNCING:
+        # Activity flags take priority over status string
+        if stats.is_listing:
+            self.indicator.set_icon_full(self.ICON_SYNCING, "Indexing")
+            self.pause_item.set_label("Pause Syncing")
+            self.status_item.set_label(
+                f"Indexing {stats.listing_files:,} files..."
+            )
+        elif stats.is_downloading:
+            self.indicator.set_icon_full(self.ICON_SYNCING, "Downloading")
+            self.pause_item.set_label("Pause Syncing")
+            pct = int(100 * stats.download_done / stats.download_total) if stats.download_total > 0 else 0
+            eta_str = f" ({self._format_eta(stats.eta_seconds)})" if stats.eta_seconds else ""
+            self.status_item.set_label(f"Downloading {pct}%{eta_str}")
+        elif stats.is_uploading:
+            self.indicator.set_icon_full(self.ICON_SYNCING, "Uploading")
+            self.pause_item.set_label("Pause Syncing")
+            pct = int(100 * stats.upload_done / stats.upload_total) if stats.upload_total > 0 else 0
+            eta_str = f" ({self._format_eta(stats.eta_seconds)})" if stats.eta_seconds else ""
+            self.status_item.set_label(f"Uploading {pct}%{eta_str}")
+        elif stats.status == DaemonStatus.SYNCING:
             self.indicator.set_icon_full(self.ICON_SYNCING, "Syncing")
             self.pause_item.set_label("Pause Syncing")
-
-            if stats.is_listing:
-                self.status_item.set_label(
-                    f"Indexing {stats.listing_files:,} files..."
-                )
-            elif stats.is_downloading:
-                pct = int(100 * stats.download_done / stats.download_total) if stats.download_total > 0 else 0
-                eta_str = f" ({self._format_eta(stats.eta_seconds)})" if stats.eta_seconds else ""
-                self.status_item.set_label(f"Downloading {pct}%{eta_str}")
-            elif stats.is_uploading:
-                pct = int(100 * stats.upload_done / stats.upload_total) if stats.upload_total > 0 else 0
-                eta_str = f" ({self._format_eta(stats.eta_seconds)})" if stats.eta_seconds else ""
-                self.status_item.set_label(f"Uploading {pct}%{eta_str}")
-            elif stats.current_file:
+            if stats.current_file:
                 filename = os.path.basename(stats.current_file)
                 self.status_item.set_label(f"Syncing {filename[:30]}...")
             else:
                 self.status_item.set_label("Syncing...")
-
         elif stats.status == DaemonStatus.PAUSED:
             self.indicator.set_icon_full(self.ICON_PAUSED, "Paused")
             self.status_item.set_label("Syncing paused")
             self.pause_item.set_label("Resume Syncing")
-
         elif stats.status == DaemonStatus.ERROR:
             self.indicator.set_icon_full(self.ICON_ERROR, "Error")
             self.status_item.set_label("Sync error")
             self.pause_item.set_label("Pause Syncing")
-
         elif stats.status == DaemonStatus.RUNNING:
             self.pause_item.set_label("Pause Syncing")
             if stats.pending_upload > 0 or stats.pending_download > 0:
@@ -431,7 +436,6 @@ class BisyncTray:
             else:
                 self.indicator.set_icon_full(self.ICON_SYNCED, "Up to date")
                 self.status_item.set_label("Up to date")
-
         else:
             self.indicator.set_icon_full(self.ICON_IDLE, "Starting")
             self.status_item.set_label("Starting...")
@@ -473,20 +477,23 @@ class BisyncTray:
         if stats.total_files > 0:
             self.storage_item.set_label(f"    {stats.synced_files:,} of {stats.total_files:,} files synced")
 
-        # Update icon and status label
+        # Activity flags take priority — same logic as full update
         status = stats.status.lower()
-        if status == "syncing":
+
+        if stats.is_listing:
+            self.indicator.set_icon_full(self.ICON_SYNCING, "Indexing")
+            self.status_item.set_label("Indexing files...")
+        elif stats.is_downloading:
+            self.indicator.set_icon_full(self.ICON_SYNCING, "Downloading")
+            pct = int(100 * stats.download_done / stats.download_total) if stats.download_total > 0 else 0
+            self.status_item.set_label(f"Downloading {pct}%")
+        elif stats.is_uploading:
+            self.indicator.set_icon_full(self.ICON_SYNCING, "Uploading")
+            pct = int(100 * stats.upload_done / stats.upload_total) if stats.upload_total > 0 else 0
+            self.status_item.set_label(f"Uploading {pct}%")
+        elif status == "syncing":
             self.indicator.set_icon_full(self.ICON_SYNCING, "Syncing")
-            if stats.is_listing:
-                self.status_item.set_label("Indexing files...")
-            elif stats.is_downloading:
-                pct = int(100 * stats.download_done / stats.download_total) if stats.download_total > 0 else 0
-                self.status_item.set_label(f"Downloading {pct}%")
-            elif stats.is_uploading:
-                pct = int(100 * stats.upload_done / stats.upload_total) if stats.upload_total > 0 else 0
-                self.status_item.set_label(f"Uploading {pct}%")
-            else:
-                self.status_item.set_label("Syncing...")
+            self.status_item.set_label("Syncing...")
         elif status == "paused":
             self.indicator.set_icon_full(self.ICON_PAUSED, "Paused")
             self.status_item.set_label("Syncing paused")
@@ -519,20 +526,37 @@ class BisyncTray:
 
         stats = self.daemon.get_stats()
 
-        # Update icon based on status
-        if stats.status == DaemonStatus.SYNCING:
+        # Activity flags take priority
+        if stats.is_listing:
+            self.indicator.set_icon_full(self.ICON_SYNCING, "Indexing")
+            self.status_item.set_label(f"Indexing {stats.listing_files:,} files...")
+        elif stats.is_downloading:
+            self.indicator.set_icon_full(self.ICON_SYNCING, "Downloading")
+            pct = int(100 * stats.download_done / stats.download_total) if stats.download_total > 0 else 0
+            self.status_item.set_label(f"Downloading {pct}%")
+        elif stats.is_uploading:
+            self.indicator.set_icon_full(self.ICON_SYNCING, "Uploading")
+            pct = int(100 * stats.upload_done / stats.upload_total) if stats.upload_total > 0 else 0
+            self.status_item.set_label(f"Uploading {pct}%")
+        elif stats.status == DaemonStatus.SYNCING:
             self.indicator.set_icon_full(self.ICON_SYNCING, "Syncing")
+            self.status_item.set_label("Syncing...")
         elif stats.status == DaemonStatus.PAUSED:
             self.indicator.set_icon_full(self.ICON_PAUSED, "Paused")
+            self.status_item.set_label("Syncing paused")
         elif stats.status == DaemonStatus.ERROR:
             self.indicator.set_icon_full(self.ICON_ERROR, "Error")
+            self.status_item.set_label("Sync error")
         elif stats.status == DaemonStatus.RUNNING:
             if stats.pending_upload > 0 or stats.pending_download > 0:
                 self.indicator.set_icon_full(self.ICON_SYNCING, "Pending")
+                self.status_item.set_label(f"Syncing {stats.pending_upload + stats.pending_download} items...")
             else:
                 self.indicator.set_icon_full(self.ICON_SYNCED, "Up to date")
+                self.status_item.set_label("Up to date")
         else:
             self.indicator.set_icon_full(self.ICON_IDLE, "Starting")
+            self.status_item.set_label("Starting...")
 
         return True  # Continue the timeout
 
