@@ -66,25 +66,29 @@ type pendingEvent struct {
 	timer *time.Timer
 }
 
-// New creates a new file watcher.
-func New(rootPath string, bufferSize int, logger *slog.Logger) (*Watcher, error) {
+// New creates a new file watcher. extraPatterns are merged with the
+// built-in ignore list (e.g. from config.ExcludePatterns).
+func New(rootPath string, bufferSize int, logger *slog.Logger, extraPatterns []string) (*Watcher, error) {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
 	}
 
+	patterns := []string{
+		".git", ".DS_Store", "*.tmp", "*.swp", "*.swx",
+		"*~", ".~*", "*.part", "*.crdownload", ".rclone*",
+	}
+	patterns = append(patterns, extraPatterns...)
+
 	return &Watcher{
-		watcher:  w,
-		rootPath: rootPath,
-		events:   make(chan FileEvent, bufferSize),
-		ignorePatterns: []string{
-			".git", ".DS_Store", "*.tmp", "*.swp", "*.swx",
-			"*~", ".~*", "*.part", "*.crdownload", ".rclone*",
-		},
-		logger:       logger,
-		debounceTime: time.Second,
-		pending:      make(map[string]*pendingEvent),
-		debounceStop: make(chan struct{}),
+		watcher:        w,
+		rootPath:       rootPath,
+		events:         make(chan FileEvent, bufferSize),
+		ignorePatterns: patterns,
+		logger:         logger,
+		debounceTime:   time.Second,
+		pending:        make(map[string]*pendingEvent),
+		debounceStop:   make(chan struct{}),
 	}, nil
 }
 

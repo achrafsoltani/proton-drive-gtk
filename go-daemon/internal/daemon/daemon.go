@@ -51,14 +51,14 @@ func New(cfg *config.Config, logger *slog.Logger) (*Daemon, error) {
 	}
 
 	// Create file watcher
-	w, err := watcher.New(cfg.LocalPath, 1000, logger)
+	w, err := watcher.New(cfg.LocalPath, 1000, logger, cfg.ExcludePatterns)
 	if err != nil {
 		stateDB.Close()
 		return nil, fmt.Errorf("failed to create watcher: %w", err)
 	}
 
 	// Create sync engine
-	engine := sync.NewEngine(cfg.LocalPath, cfg.RemoteName, stateDB, w, logger, cfg.MaxConcurrentTransfers)
+	engine := sync.NewEngine(cfg.LocalPath, cfg.RemoteName, stateDB, w, logger, cfg.MaxConcurrentTransfers, cfg.ExcludePatterns)
 
 	// Create IPC server
 	ipcServer, err := ipc.NewServer(paths.SocketPath, engine, logger)
