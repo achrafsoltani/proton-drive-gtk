@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -48,12 +49,13 @@ type Stats struct {
 
 // Engine is the core sync engine.
 type Engine struct {
-	localPath   string
-	remoteName  string
-	db          *db.StateDB
-	rclone      *rclone.Client
-	watcher     *watcher.Watcher
-	logger      *slog.Logger
+	localPath       string
+	remoteName      string
+	excludePatterns []string
+	db              *db.StateDB
+	rclone          *rclone.Client
+	watcher         *watcher.Watcher
+	logger          *slog.Logger
 
 	mu          sync.RWMutex
 	status      Status
@@ -77,26 +79,29 @@ type Engine struct {
 	syncMu       sync.Mutex
 
 	// Concurrency control
-	syncRunning   atomic.Bool        // Prevents concurrent Sync() calls
-	downloadSem   chan struct{}      // Limits concurrent downloads
+	syncRunning     atomic.Bool      // Prevents concurrent Sync() calls
+	downloadSem     chan struct{}    // Limits concurrent downloads
+	uploadSem       chan struct{}    // Limits concurrent uploads
 	activeDownloads sync.Map         // Tracks files being downloaded (to ignore watcher events)
 }
 
 // NewEngine creates a new sync engine.
-func NewEngine(localPath, remoteName string, stateDB *db.StateDB, w *watcher.Watcher, logger *slog.Logger, maxTransfers int) *Engine {
+func NewEngine(localPath, remoteName string, stateDB *db.StateDB, w *watcher.Watcher, logger *slog.Logger, maxTransfers int, excludePatterns []string) *Engine {
 	if maxTransfers < 1 {
 		maxTransfers = 4
 	}
 	return &Engine{
-		localPath:    localPath,
-		remoteName:   remoteName,
-		db:           stateDB,
-		rclone:       rclone.NewClient(remoteName, logger),
-		watcher:      w,
-		logger:       logger,
-		status:       StatusStopped,
-		syncInterval: 60 * time.Second,
-		downloadSem:  make(chan struct{}, maxTransfers),
+		localPath:       localPath,
+		remoteName:      remoteName,
+		excludePatterns: excludePatterns,
+		db:              stateDB,
+		rclone:          rclone.NewClient(remoteName, logger),
+		watcher:         w,
+		logger:          logger,
+		status:          StatusStopped,
+		syncInterval:    60 * time.Second,
+		downloadSem:     make(chan struct{}, maxTransfers),
+		uploadSem:       make(chan struct{}, maxTransfers),
 	}
 }
 
@@ -317,16 +322,15 @@ func (e *Engine) listRemoteFiles(ctx context.Context) error {
 
 	e.logger.Info("listing remote files...")
 
+	const batchSize = 100
+	var batch []*db.RemoteFile
 	var count int
+
 	err := e.rclone.StreamListRecursive(ctx, func(rf *rclone.RemoteFile) error {
 		count++
 		e.listingFiles.Store(int32(count))
 
-		if count%100 == 0 {
-			e.logger.Info("listing progress", "files", count)
-		}
-
-		return e.db.SaveRemoteFile(&db.RemoteFile{
+		batch = append(batch, &db.RemoteFile{
 			Path:       rf.Path,
 			Name:       rf.Name,
 			Size:       rf.Size,
@@ -335,14 +339,47 @@ func (e *Engine) listRemoteFiles(ctx context.Context) error {
 			FileID:     rf.ID,
 			Downloaded: false,
 		})
+
+		if len(batch) >= batchSize {
+			e.logger.Info("listing progress", "files", count)
+			if err := e.db.SaveRemoteFilesBatch(batch); err != nil {
+				return err
+			}
+			batch = batch[:0]
+		}
+
+		return nil
 	})
 
 	if err != nil {
 		return err
 	}
 
+	// Flush remaining
+	if len(batch) > 0 {
+		if err := e.db.SaveRemoteFilesBatch(batch); err != nil {
+			return err
+		}
+	}
+
 	e.logger.Info("listed remote files", "count", count)
 	return e.db.SetListingComplete(count)
+}
+
+func (e *Engine) shouldExclude(path string) bool {
+	name := filepath.Base(path)
+	for _, pattern := range e.excludePatterns {
+		if matched, _ := filepath.Match(pattern, name); matched {
+			return true
+		}
+		if strings.Contains(path, string(filepath.Separator)+pattern+string(filepath.Separator)) ||
+			strings.HasSuffix(path, string(filepath.Separator)+pattern) ||
+			strings.HasPrefix(path, pattern+string(filepath.Separator)) ||
+			path == pattern {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Engine) scanLocalFiles() (map[string]os.FileInfo, error) {
@@ -352,12 +389,20 @@ func (e *Engine) scanLocalFiles() (map[string]os.FileInfo, error) {
 		if err != nil {
 			return nil
 		}
-		if d.IsDir() {
-			return nil
-		}
 
 		relPath, err := filepath.Rel(e.localPath, path)
 		if err != nil {
+			return nil
+		}
+
+		if e.shouldExclude(relPath) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if d.IsDir() {
 			return nil
 		}
 
@@ -469,38 +514,54 @@ func (e *Engine) uploadNewFiles(ctx context.Context, localFiles map[string]os.Fi
 
 	e.logger.Info("uploading files", "count", len(toUpload))
 
+	var wg sync.WaitGroup
+
 	for _, relPath := range toUpload {
 		if e.IsPaused() {
-			return nil
+			break
 		}
 
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			break
 		default:
 		}
 
-		localPath := filepath.Join(e.localPath, relPath)
-		e.setCurrentFile(relPath)
-
-		info, err := os.Stat(localPath)
-		if err != nil {
-			continue
+		// Acquire semaphore
+		select {
+		case e.uploadSem <- struct{}{}:
+		case <-ctx.Done():
+			break
 		}
 
-		if err := e.rclone.Upload(ctx, localPath, relPath); err != nil {
-			e.logger.Error("upload failed", "path", relPath, "error", err)
-			e.db.AddSyncHistory("upload", localPath, "failed")
-			continue
-		}
+		wg.Add(1)
+		go func(relPath string) {
+			defer wg.Done()
+			defer func() { <-e.uploadSem }()
 
-		e.db.MarkSynced(relPath, float64(info.ModTime().Unix()), info.Size())
-		e.db.AddSyncHistory("upload", localPath, "success")
+			localPath := filepath.Join(e.localPath, relPath)
+			e.setCurrentFile(relPath)
 
-		e.uploadDone.Add(1)
-		e.logger.Debug("uploaded", "path", relPath)
+			info, err := os.Stat(localPath)
+			if err != nil {
+				return
+			}
+
+			if err := e.rclone.Upload(ctx, localPath, relPath); err != nil {
+				e.logger.Error("upload failed", "path", relPath, "error", err)
+				e.db.AddSyncHistory("upload", localPath, "failed")
+				return
+			}
+
+			e.db.MarkSynced(relPath, float64(info.ModTime().Unix()), info.Size())
+			e.db.AddSyncHistory("upload", localPath, "success")
+
+			e.uploadDone.Add(1)
+			e.logger.Debug("uploaded", "path", relPath)
+		}(relPath)
 	}
 
+	wg.Wait()
 	e.setCurrentFile("")
 	return nil
 }
