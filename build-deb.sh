@@ -5,18 +5,31 @@ set -e
 
 VERSION="1.1.0"
 PACKAGE="proton-drive-gtk"
-ARCH="all"
+ARCH="amd64"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/build/${PACKAGE}_${VERSION}_${ARCH}"
 
 echo "=== Building ${PACKAGE} ${VERSION} ==="
 
+# Build Go daemon if Go is available
+if command -v go &> /dev/null; then
+    echo "Building Go sync daemon..."
+    cd "$SCRIPT_DIR/go-daemon"
+    mkdir -p bin
+    CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/proton-sync-daemon ./cmd/proton-sync-daemon
+    cd "$SCRIPT_DIR"
+    echo "Go daemon built successfully"
+else
+    echo "Warning: Go not found, skipping Go daemon build"
+fi
+
 # Clean previous build
 rm -rf "$SCRIPT_DIR/build"
 mkdir -p "$BUILD_DIR/DEBIAN"
 mkdir -p "$BUILD_DIR/usr/bin"
 mkdir -p "$BUILD_DIR/usr/share/proton-drive-gtk"
+mkdir -p "$BUILD_DIR/usr/share/proton-drive-gtk/bin"
 mkdir -p "$BUILD_DIR/usr/share/applications"
 mkdir -p "$BUILD_DIR/usr/share/doc/${PACKAGE}"
 mkdir -p "$BUILD_DIR/usr/share/nautilus-python/extensions"
@@ -39,6 +52,13 @@ cp "$SCRIPT_DIR/src/daemon/"*.py "$BUILD_DIR/usr/share/proton-drive-gtk/daemon/"
 if [ -d "$SCRIPT_DIR/src/utils" ]; then
     mkdir -p "$BUILD_DIR/usr/share/proton-drive-gtk/utils"
     cp "$SCRIPT_DIR/src/utils/"*.py "$BUILD_DIR/usr/share/proton-drive-gtk/utils/" 2>/dev/null || true
+fi
+
+# Copy Go daemon binary if it was built
+if [ -f "$SCRIPT_DIR/go-daemon/bin/proton-sync-daemon" ]; then
+    cp "$SCRIPT_DIR/go-daemon/bin/proton-sync-daemon" "$BUILD_DIR/usr/share/proton-drive-gtk/bin/"
+    chmod 755 "$BUILD_DIR/usr/share/proton-drive-gtk/bin/proton-sync-daemon"
+    echo "Go daemon binary included in package"
 fi
 
 # Copy Nautilus extension

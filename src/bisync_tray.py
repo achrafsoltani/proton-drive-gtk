@@ -58,6 +58,12 @@ from daemon import SyncDaemon, StateDatabase, SyncStatus
 from daemon.sync_daemon import DaemonStatus
 from config import Config, get_config
 from nautilus_server import NautilusSocketServer, SyncStatusCache
+from daemon_client import DaemonClient, DaemonStats
+
+# Path to Go daemon binary (development and installed locations)
+GO_DAEMON_BINARY = Path(__file__).parent.parent / "go-daemon" / "bin" / "proton-sync-daemon"
+GO_DAEMON_INSTALLED = Path("/usr/share/proton-drive-gtk/bin/proton-sync-daemon")
+GO_DAEMON_LOCAL = Path(__file__).parent / "bin" / "proton-sync-daemon"  # For when run from /usr/share
 
 
 class BisyncSettingsDialog(Gtk.Dialog):
@@ -148,7 +154,10 @@ class BisyncTray:
     def __init__(self):
         self.config = get_config()
         self.daemon: Optional[SyncDaemon] = None
+        self.daemon_process: Optional[subprocess.Popen] = None
+        self.daemon_client: Optional[DaemonClient] = None
         self.nautilus_server: Optional[NautilusSocketServer] = None
+        self._use_go_daemon = self.config.use_go_daemon
 
         # Create indicator
         self.indicator = AppIndicator.Indicator.new(
@@ -286,6 +295,87 @@ class BisyncTray:
 
     def _update_status(self) -> bool:
         """Update the tray status and icon (Dropbox-style)."""
+        if self._use_go_daemon:
+            return self._update_status_go()
+        else:
+            return self._update_status_python()
+
+    def _update_status_go(self) -> bool:
+        """Update status from Go daemon."""
+        if not self.daemon_client:
+            self.indicator.set_icon_full(self.ICON_IDLE, "Not running")
+            self.status_item.set_label("Not running")
+            self.storage_item.set_label("    --")
+            return True
+
+        try:
+            stats = self.daemon_client.get_stats()
+        except Exception:
+            self.indicator.set_icon_full(self.ICON_ERROR, "Connection lost")
+            self.status_item.set_label("Daemon not responding")
+            return True
+
+        # Update storage/files info
+        if stats.total_files > 0:
+            self.storage_item.set_label(f"    {stats.synced_files:,} of {stats.total_files:,} files synced")
+        else:
+            self.storage_item.set_label("    Calculating...")
+
+        # Map Go daemon status to icons
+        status = stats.status.lower()
+        if status == "syncing":
+            self.indicator.set_icon_full(self.ICON_SYNCING, "Syncing")
+            self.pause_item.set_label("Pause Syncing")
+
+            if stats.is_listing:
+                self.status_item.set_label("Indexing files...")
+            elif stats.is_downloading:
+                pct = int(100 * stats.download_done / stats.download_total) if stats.download_total > 0 else 0
+                eta_str = f" ({self._format_eta(stats.eta_seconds)})" if stats.eta_seconds else ""
+                self.status_item.set_label(f"Downloading {pct}%{eta_str}")
+            elif stats.is_uploading:
+                pct = int(100 * stats.upload_done / stats.upload_total) if stats.upload_total > 0 else 0
+                eta_str = f" ({self._format_eta(stats.eta_seconds)})" if stats.eta_seconds else ""
+                self.status_item.set_label(f"Uploading {pct}%{eta_str}")
+            elif stats.current_file:
+                filename = os.path.basename(stats.current_file)
+                self.status_item.set_label(f"Syncing {filename[:30]}...")
+            else:
+                self.status_item.set_label("Syncing...")
+
+        elif status == "paused":
+            self.indicator.set_icon_full(self.ICON_PAUSED, "Paused")
+            self.status_item.set_label("Syncing paused")
+            self.pause_item.set_label("Resume Syncing")
+
+        elif status == "error":
+            self.indicator.set_icon_full(self.ICON_ERROR, "Error")
+            self.status_item.set_label("Sync error")
+            self.pause_item.set_label("Pause Syncing")
+
+        elif status == "running":
+            self.pause_item.set_label("Pause Syncing")
+            if stats.pending_upload > 0 or stats.pending_download > 0:
+                self.indicator.set_icon_full(self.ICON_SYNCING, "Pending")
+                self.status_item.set_label(f"Syncing {stats.pending_upload + stats.pending_download} items...")
+            else:
+                self.indicator.set_icon_full(self.ICON_SYNCED, "Up to date")
+                self.status_item.set_label("Up to date")
+
+        else:
+            self.indicator.set_icon_full(self.ICON_IDLE, "Starting")
+            self.status_item.set_label("Starting...")
+            self.pause_item.set_label("Pause Syncing")
+
+        # Show/hide errors
+        self.errors_item.set_visible(stats.errors > 0)
+        if stats.errors > 0:
+            self.errors_item.set_label(f"View Errors ({stats.errors})...")
+
+        return True
+
+    def _update_status_python(self) -> bool:
+        """Update status from Python daemon."""
         if self.daemon is None:
             self.indicator.set_icon_full(self.ICON_IDLE, "Not running")
             self.status_item.set_label("Not running")
@@ -360,6 +450,42 @@ class BisyncTray:
 
     def _update_status_light(self) -> bool:
         """Lightweight status update - only updates icon and status label."""
+        if self._use_go_daemon:
+            return self._update_status_light_go()
+        else:
+            return self._update_status_light_python()
+
+    def _update_status_light_go(self) -> bool:
+        """Lightweight status update for Go daemon."""
+        if not self.daemon_client:
+            self.indicator.set_icon_full(self.ICON_IDLE, "Not running")
+            return True
+
+        try:
+            stats = self.daemon_client.get_stats()
+        except Exception:
+            self.indicator.set_icon_full(self.ICON_ERROR, "Connection lost")
+            return True
+
+        status = stats.status.lower()
+        if status == "syncing":
+            self.indicator.set_icon_full(self.ICON_SYNCING, "Syncing")
+        elif status == "paused":
+            self.indicator.set_icon_full(self.ICON_PAUSED, "Paused")
+        elif status == "error":
+            self.indicator.set_icon_full(self.ICON_ERROR, "Error")
+        elif status == "running":
+            if stats.pending_upload > 0 or stats.pending_download > 0:
+                self.indicator.set_icon_full(self.ICON_SYNCING, "Pending")
+            else:
+                self.indicator.set_icon_full(self.ICON_SYNCED, "Up to date")
+        else:
+            self.indicator.set_icon_full(self.ICON_IDLE, "Starting")
+
+        return True
+
+    def _update_status_light_python(self) -> bool:
+        """Lightweight status update for Python daemon."""
         if self.daemon is None:
             self.indicator.set_icon_full(self.ICON_IDLE, "Not running")
             return True
@@ -390,9 +516,6 @@ class BisyncTray:
 
     def _update_recent_files(self):
         """Update the recently changed files submenu (called on submenu show)."""
-        if not self.daemon:
-            return
-
         import time
         # Only update if more than 10 seconds since last update
         now = time.time()
@@ -404,23 +527,33 @@ class BisyncTray:
         for child in self.recent_files_menu.get_children():
             self.recent_files_menu.remove(child)
 
-        # Get recent sync history
-        try:
-            recent = self.daemon.db.get_recent_history(limit=10)
-            if recent:
-                for entry in recent:
-                    filename = os.path.basename(entry.path)
-                    # Truncate long names
-                    if len(filename) > 40:
-                        filename = filename[:37] + "..."
-                    item = Gtk.MenuItem(label=filename)
-                    item.connect("activate", self._on_open_recent_file, entry.path)
-                    self.recent_files_menu.append(item)
-            else:
+        # Get recent sync history (only available with Python daemon)
+        if self._use_go_daemon:
+            # Go daemon doesn't expose recent files yet
+            no_recent = Gtk.MenuItem(label="No recent changes")
+            no_recent.set_sensitive(False)
+            self.recent_files_menu.append(no_recent)
+        elif self.daemon:
+            try:
+                recent = self.daemon.db.get_recent_history(limit=10)
+                if recent:
+                    for entry in recent:
+                        filename = os.path.basename(entry.path)
+                        # Truncate long names
+                        if len(filename) > 40:
+                            filename = filename[:37] + "..."
+                        item = Gtk.MenuItem(label=filename)
+                        item.connect("activate", self._on_open_recent_file, entry.path)
+                        self.recent_files_menu.append(item)
+                else:
+                    no_recent = Gtk.MenuItem(label="No recent changes")
+                    no_recent.set_sensitive(False)
+                    self.recent_files_menu.append(no_recent)
+            except Exception:
                 no_recent = Gtk.MenuItem(label="No recent changes")
                 no_recent.set_sensitive(False)
                 self.recent_files_menu.append(no_recent)
-        except Exception:
+        else:
             no_recent = Gtk.MenuItem(label="No recent changes")
             no_recent.set_sensitive(False)
             self.recent_files_menu.append(no_recent)
@@ -438,14 +571,30 @@ class BisyncTray:
 
     def _on_sync_now(self, widget):
         """Handle sync now action."""
-        if self.daemon:
+        if self._use_go_daemon:
+            if self.daemon_client:
+                if not self.daemon_client.force_sync():
+                    self._show_error("Sync Failed", "Failed to trigger sync")
+        elif self.daemon:
             success, message = self.daemon.force_sync()
             if not success:
                 self._show_error("Sync Failed", message)
 
     def _on_pause_toggle(self, widget):
         """Handle pause/resume toggle."""
-        if self.daemon:
+        if self._use_go_daemon:
+            if self.daemon_client:
+                try:
+                    stats = self.daemon_client.get_stats()
+                    if stats.status.lower() == "paused":
+                        if not self.daemon_client.resume():
+                            self._show_error("Resume Failed", "Failed to resume sync")
+                    else:
+                        if not self.daemon_client.pause():
+                            self._show_error("Pause Failed", "Failed to pause sync")
+                except Exception as e:
+                    self._show_error("Error", str(e))
+        elif self.daemon:
             if self.daemon.status == DaemonStatus.PAUSED:
                 success, message = self.daemon.resume()
                 if not success:
@@ -459,7 +608,15 @@ class BisyncTray:
 
     def _on_check_remote(self, widget):
         """Check for remote changes immediately."""
-        if self.daemon:
+        if self._use_go_daemon:
+            if self.daemon_client:
+                # Clear cache then trigger sync
+                self.daemon_client.clear_cache()
+                if self.daemon_client.force_sync():
+                    self.status_item.set_label("Checking remote...")
+                else:
+                    self._show_error("Check Failed", "Failed to trigger remote check")
+        elif self.daemon:
             # Clear the cache to force a fresh remote listing
             self.daemon.db.clear_remote_files_cache()
             success, message = self.daemon.force_sync()
@@ -512,54 +669,72 @@ class BisyncTray:
 
     def _on_view_conflicts(self, widget):
         """Show conflicts dialog."""
-        if not self.daemon:
-            return
-
-        conflicts = self.daemon.db.get_files_by_status(SyncStatus.CONFLICT)
-
         dialog = Gtk.MessageDialog(
             message_type=Gtk.MessageType.WARNING,
             buttons=Gtk.ButtonsType.OK,
             text="Sync Conflicts"
         )
 
-        if conflicts:
-            text = "The following files have conflicts:\n\n"
-            text += "\n".join(f"• {os.path.basename(p)}" for p in conflicts[:10])
-            if len(conflicts) > 10:
-                text += f"\n\n...and {len(conflicts) - 10} more"
-            dialog.format_secondary_text(text)
-        else:
+        if self._use_go_daemon:
+            # Go daemon doesn't expose conflict list yet
             dialog.format_secondary_text("No conflicts found.")
+        elif self.daemon:
+            conflicts = self.daemon.db.get_files_by_status(SyncStatus.CONFLICT)
+            if conflicts:
+                text = "The following files have conflicts:\n\n"
+                text += "\n".join(f"• {os.path.basename(p)}" for p in conflicts[:10])
+                if len(conflicts) > 10:
+                    text += f"\n\n...and {len(conflicts) - 10} more"
+                dialog.format_secondary_text(text)
+            else:
+                dialog.format_secondary_text("No conflicts found.")
+        else:
+            dialog.format_secondary_text("Daemon not running.")
 
         dialog.run()
         dialog.destroy()
 
     def _on_view_errors(self, widget):
         """Show errors dialog."""
-        if not self.daemon:
-            return
-
-        errors = self.daemon.db.get_files_by_status(SyncStatus.ERROR)
-
         dialog = Gtk.MessageDialog(
             message_type=Gtk.MessageType.ERROR,
             buttons=Gtk.ButtonsType.OK,
             text="Sync Errors"
         )
 
-        if errors:
-            text = "The following files have errors:\n\n"
-            for path in errors[:10]:
-                state = self.daemon.db.get_file_state(path)
-                name = os.path.basename(path)
-                error = state.error_message if state else "Unknown error"
-                text += f"• {name}: {error}\n"
-            if len(errors) > 10:
-                text += f"\n...and {len(errors) - 10} more"
-            dialog.format_secondary_text(text)
+        if self._use_go_daemon:
+            # Go daemon shows error count but not details yet
+            if self.daemon_client:
+                try:
+                    stats = self.daemon_client.get_stats()
+                    if stats.errors > 0:
+                        dialog.format_secondary_text(
+                            f"There are {stats.errors} file(s) with errors.\n\n"
+                            "Check the log file for details:\n"
+                            "/tmp/proton-drive-gtk.log"
+                        )
+                    else:
+                        dialog.format_secondary_text("No errors found.")
+                except Exception:
+                    dialog.format_secondary_text("Could not retrieve error information.")
+            else:
+                dialog.format_secondary_text("Daemon not running.")
+        elif self.daemon:
+            errors = self.daemon.db.get_files_by_status(SyncStatus.ERROR)
+            if errors:
+                text = "The following files have errors:\n\n"
+                for path in errors[:10]:
+                    state = self.daemon.db.get_file_state(path)
+                    name = os.path.basename(path)
+                    error = state.error_message if state else "Unknown error"
+                    text += f"• {name}: {error}\n"
+                if len(errors) > 10:
+                    text += f"\n...and {len(errors) - 10} more"
+                dialog.format_secondary_text(text)
+            else:
+                dialog.format_secondary_text("No errors found.")
         else:
-            dialog.format_secondary_text("No errors found.")
+            dialog.format_secondary_text("Daemon not running.")
 
         dialog.run()
         dialog.destroy()
@@ -576,7 +751,15 @@ class BisyncTray:
             dialog.save_config()
             self.config = get_config()
             # Restart daemon with new config
-            if self.daemon:
+            if self._use_go_daemon:
+                if self.daemon_process:
+                    self.daemon_process.terminate()
+                    try:
+                        self.daemon_process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        self.daemon_process.kill()
+                self._start_daemon()
+            elif self.daemon:
                 self.daemon.stop()
                 self._start_daemon()
         dialog.destroy()
@@ -609,6 +792,12 @@ class BisyncTray:
             self.nautilus_server.stop()
         if self.daemon:
             self.daemon.stop()
+        if self.daemon_process:
+            self.daemon_process.terminate()
+            try:
+                self.daemon_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.daemon_process.kill()
         Gtk.main_quit()
 
     def _show_error(self, title: str, message: str):
@@ -624,6 +813,60 @@ class BisyncTray:
 
     def _start_daemon(self) -> bool:
         """Start the sync daemon."""
+        if self._use_go_daemon:
+            return self._start_go_daemon()
+        else:
+            return self._start_python_daemon()
+
+    def _start_go_daemon(self) -> bool:
+        """Start the Go sync daemon."""
+        # Find the Go daemon binary (check multiple locations)
+        daemon_bin = None
+        for path in [GO_DAEMON_BINARY, GO_DAEMON_INSTALLED, GO_DAEMON_LOCAL]:
+            if path.exists():
+                daemon_bin = path
+                break
+
+        if not daemon_bin:
+            print("Go daemon not found, falling back to Python daemon")
+            self._use_go_daemon = False
+            return self._start_python_daemon()
+
+        # Start the Go daemon process
+        try:
+            self.daemon_process = subprocess.Popen(
+                [str(daemon_bin)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            print(f"Started Go daemon (PID: {self.daemon_process.pid})")
+
+            # Wait a moment for daemon to start
+            import time
+            time.sleep(1)
+
+            # Create client to communicate with daemon
+            self.daemon_client = DaemonClient()
+
+            # Check if daemon is running
+            if not self.daemon_client.is_running():
+                print("Go daemon failed to start, falling back to Python daemon")
+                self._use_go_daemon = False
+                return self._start_python_daemon()
+
+            print("Go daemon started successfully")
+
+        except Exception as e:
+            print(f"Failed to start Go daemon: {e}, falling back to Python daemon")
+            self._use_go_daemon = False
+            return self._start_python_daemon()
+
+        # Start Nautilus integration (still uses Python server for now)
+        self._start_nautilus_server()
+        return True
+
+    def _start_python_daemon(self) -> bool:
+        """Start the Python sync daemon."""
         self.daemon = SyncDaemon(
             local_path=self.config.mount_path,
             remote_name=self.config.remote_name,
@@ -639,7 +882,12 @@ class BisyncTray:
             self._show_error("Start Failed", message)
             return False
 
-        # Start Nautilus integration server for file emblems
+        # Start Nautilus integration
+        self._start_nautilus_server()
+        return True
+
+    def _start_nautilus_server(self):
+        """Start the Nautilus integration server."""
         try:
             status_cache = SyncStatusCache(
                 mount_path=str(self.config.mount_path),
@@ -656,8 +904,6 @@ class BisyncTray:
                 print("Warning: Failed to start Nautilus integration")
         except Exception as e:
             print(f"Warning: Nautilus integration error: {e}")
-
-        return True
 
     def _on_daemon_status_change(self, status: DaemonStatus):
         """Handle daemon status changes."""
@@ -676,12 +922,18 @@ class BisyncTray:
 
         # Setup signal handlers for pause/resume from terminal
         def handle_pause(signum, frame):
-            if self.daemon:
+            if self._use_go_daemon and self.daemon_client:
+                GLib.idle_add(lambda: self.daemon_client.pause())
+                print("Sync paused (send SIGUSR2 to resume)")
+            elif self.daemon:
                 GLib.idle_add(lambda: self.daemon.pause())
                 print("Sync paused (send SIGUSR2 to resume)")
 
         def handle_resume(signum, frame):
-            if self.daemon:
+            if self._use_go_daemon and self.daemon_client:
+                GLib.idle_add(lambda: self.daemon_client.resume())
+                print("Sync resumed")
+            elif self.daemon:
                 GLib.idle_add(lambda: self.daemon.resume())
                 print("Sync resumed")
 

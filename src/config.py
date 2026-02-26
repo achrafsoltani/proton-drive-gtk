@@ -32,6 +32,7 @@ class Config:
     sync_interval: int = 60  # Seconds between remote checks
     conflict_resolution: str = "newer"  # "newer", "local", "remote"
     start_on_login: bool = False
+    use_go_daemon: bool = True  # Use Go daemon instead of Python
 
     # Selective sync (folder -> enabled)
     selective_sync_enabled: bool = False
