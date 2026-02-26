@@ -81,9 +81,13 @@ class StateDatabase:
         if not hasattr(self._local, 'connection'):
             self._local.connection = sqlite3.connect(
                 str(self.db_path),
-                check_same_thread=False
+                check_same_thread=False,
+                timeout=30.0  # Wait up to 30 seconds for locks
             )
             self._local.connection.row_factory = sqlite3.Row
+            # Enable WAL mode for better concurrent access
+            self._local.connection.execute("PRAGMA journal_mode=WAL")
+            self._local.connection.execute("PRAGMA busy_timeout=30000")
         return self._local.connection
 
     def _init_schema(self) -> None:
