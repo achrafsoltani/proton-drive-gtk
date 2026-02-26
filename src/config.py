@@ -33,6 +33,7 @@ class Config:
     conflict_resolution: str = "newer"  # "newer", "local", "remote"
     start_on_login: bool = False
     use_go_daemon: bool = True  # Use Go daemon (with fixed concurrency)
+    max_concurrent_transfers: int = 4  # Max concurrent upload/download processes
 
     # Selective sync (folder -> enabled)
     selective_sync_enabled: bool = False
