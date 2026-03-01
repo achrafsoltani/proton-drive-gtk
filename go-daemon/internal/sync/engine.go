@@ -74,9 +74,18 @@ type Engine struct {
 	listingDirs     atomic.Int32
 
 	// Sync scheduling
-	syncInterval time.Duration
-	syncTimer    *time.Timer
-	syncMu       sync.Mutex
+	syncInterval    time.Duration
+	defaultInterval time.Duration
+	idleInterval    time.Duration
+	syncTimer       *time.Timer
+	syncMu          sync.Mutex
+
+	// Idle detection
+	lastActivity     time.Time
+	lastActivityMu   sync.Mutex
+
+	// Error backoff
+	consecutiveErrors int
 
 	// Concurrency control
 	syncRunning     atomic.Bool      // Prevents concurrent Sync() calls
@@ -100,6 +109,9 @@ func NewEngine(localPath, remoteName string, stateDB *db.StateDB, w *watcher.Wat
 		logger:          logger,
 		status:          StatusStopped,
 		syncInterval:    60 * time.Second,
+		defaultInterval: 60 * time.Second,
+		idleInterval:    5 * time.Minute,
+		lastActivity:    time.Now(),
 		downloadSem:     make(chan struct{}, maxTransfers),
 		uploadSem:       make(chan struct{}, maxTransfers),
 	}
@@ -587,6 +599,10 @@ func (e *Engine) handleFileEvents(ctx context.Context) {
 			}
 
 			e.logger.Debug("file event", "path", event.Path, "type", event.Type)
+
+			// Record activity and reset to normal interval
+			e.recordActivity()
+
 			pendingSync = true
 			debounce.Reset(2 * time.Second)
 
@@ -611,12 +627,58 @@ func (e *Engine) scheduleNextSync(ctx context.Context) {
 		e.syncTimer.Stop()
 	}
 
-	e.syncTimer = time.AfterFunc(e.syncInterval, func() {
+	interval := e.computeInterval()
+
+	e.syncTimer = time.AfterFunc(interval, func() {
 		if !e.IsPaused() {
 			if err := e.Sync(ctx); err != nil {
 				e.logger.Error("periodic sync failed", "error", err)
+				e.consecutiveErrors++
+			} else {
+				e.consecutiveErrors = 0
+				e.syncInterval = e.defaultInterval
 			}
 		}
 		e.scheduleNextSync(ctx)
 	})
+}
+
+// computeInterval returns the next sync interval based on idle state and error backoff.
+func (e *Engine) computeInterval() time.Duration {
+	// Error backoff: double interval per consecutive error, capped at idleInterval
+	if e.consecutiveErrors > 0 {
+		backoff := e.defaultInterval
+		for i := 0; i < e.consecutiveErrors; i++ {
+			backoff *= 2
+			if backoff >= e.idleInterval {
+				backoff = e.idleInterval
+				break
+			}
+		}
+		e.logger.Info("error backoff active", "errors", e.consecutiveErrors, "interval", backoff)
+		return backoff
+	}
+
+	// Idle detection: if no activity for 5 minutes, use idle interval
+	e.lastActivityMu.Lock()
+	idle := time.Since(e.lastActivity)
+	e.lastActivityMu.Unlock()
+
+	if idle > e.idleInterval {
+		e.logger.Debug("idle mode active", "idle_duration", idle, "interval", e.idleInterval)
+		return e.idleInterval
+	}
+
+	return e.defaultInterval
+}
+
+// recordActivity records file activity and resets the sync interval.
+func (e *Engine) recordActivity() {
+	e.lastActivityMu.Lock()
+	e.lastActivity = time.Now()
+	e.lastActivityMu.Unlock()
+
+	e.syncMu.Lock()
+	e.syncInterval = e.defaultInterval
+	e.syncMu.Unlock()
 }
