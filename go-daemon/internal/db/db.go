@@ -366,12 +366,15 @@ func (s *StateDB) GetRecentHistory(limit int) ([]*SyncHistoryEntry, error) {
 	return entries, rows.Err()
 }
 
-// GetStats returns sync statistics.
+// GetStats returns sync statistics in a single query.
 func (s *StateDB) GetStats() (totalFiles, syncedFiles, pendingUpload, pendingDownload, errors int) {
-	s.db.QueryRow(`SELECT COUNT(*) FROM remote_files`).Scan(&totalFiles)
-	s.db.QueryRow(`SELECT COUNT(*) FROM remote_files WHERE downloaded = 1`).Scan(&syncedFiles)
-	s.db.QueryRow(`SELECT COUNT(*) FROM files WHERE status = 'pending_upload'`).Scan(&pendingUpload)
-	s.db.QueryRow(`SELECT COUNT(*) FROM remote_files WHERE downloaded = 0`).Scan(&pendingDownload)
-	s.db.QueryRow(`SELECT COUNT(*) FROM files WHERE status = 'error'`).Scan(&errors)
+	s.db.QueryRow(`
+		SELECT
+			(SELECT COUNT(*) FROM remote_files),
+			(SELECT COUNT(*) FROM remote_files WHERE downloaded = 1),
+			(SELECT COUNT(*) FROM files WHERE status = 'pending_upload'),
+			(SELECT COUNT(*) FROM remote_files WHERE downloaded = 0),
+			(SELECT COUNT(*) FROM files WHERE status = 'error')
+	`).Scan(&totalFiles, &syncedFiles, &pendingUpload, &pendingDownload, &errors)
 	return
 }
