@@ -39,6 +39,16 @@ func DefaultConfig() *Config {
 		ShowNotifications:      true,
 		StartOnLogin:           false,
 		MaxConcurrentTransfers: 4,
+		ExcludePatterns: []string{
+			".git",
+			"node_modules",
+			"__pycache__",
+			".gradle",
+			".idea",
+			".vscode",
+			"*.tmp",
+			".DS_Store",
+		},
 	}
 }
 
