@@ -158,6 +158,11 @@ class BisyncTray:
         self.daemon_client: Optional[DaemonClient] = None
         self.nautilus_server: Optional[NautilusSocketServer] = None
         self._use_go_daemon = self.config.use_go_daemon
+        self._daemon_restart_count = 0
+        self._daemon_max_restarts = 3
+        self._daemon_restart_backoff = 10  # seconds
+        self._idle_since: Optional[float] = None  # timestamp when "Up to date" started
+        self._status_poll_id: Optional[int] = None  # GLib timeout source ID
 
         # Create indicator
         self.indicator = AppIndicator.Indicator.new(
@@ -177,7 +182,8 @@ class BisyncTray:
         self._recent_files_updated = 0
 
         # Update status periodically (lightweight)
-        GLib.timeout_add_seconds(5, self._update_status_light)
+        self._status_poll_interval = 5
+        self._status_poll_id = GLib.timeout_add_seconds(5, self._update_status_light)
 
     def _build_menu(self) -> Gtk.Menu:
         """Build the context menu (Dropbox-style)."""
@@ -461,6 +467,26 @@ class BisyncTray:
 
     def _update_status_light_go(self) -> bool:
         """Lightweight status update for Go daemon - updates icon AND menu labels."""
+        # Check for crashed daemon process (zombie reaping)
+        if self.daemon_process and self.daemon_process.poll() is not None:
+            exit_code = self.daemon_process.returncode
+            print(f"Go daemon crashed (exit code: {exit_code})")
+            self.daemon_process = None
+
+            if self._daemon_restart_count < self._daemon_max_restarts:
+                self._daemon_restart_count += 1
+                backoff = self._daemon_restart_backoff * self._daemon_restart_count
+                print(f"Auto-restarting daemon (attempt {self._daemon_restart_count}/{self._daemon_max_restarts}, backoff {backoff}s)")
+                self.indicator.set_icon_full(self.ICON_ERROR, "Restarting")
+                self.status_item.set_label(f"Daemon crashed, restarting ({self._daemon_restart_count}/{self._daemon_max_restarts})...")
+                GLib.timeout_add_seconds(backoff, self._attempt_daemon_restart)
+                return True
+            else:
+                print("Max daemon restart attempts reached")
+                self.indicator.set_icon_full(self.ICON_ERROR, "Daemon failed")
+                self.status_item.set_label("Daemon crashed (restart limit reached)")
+                return True
+
         if not self.daemon_client:
             self.indicator.set_icon_full(self.ICON_IDLE, "Not running")
             self.status_item.set_label("Not running")
@@ -473,12 +499,16 @@ class BisyncTray:
             self.status_item.set_label("Daemon not responding")
             return True
 
+        # Reset restart counter on successful connection
+        self._daemon_restart_count = 0
+
         # Update storage info
         if stats.total_files > 0:
             self.storage_item.set_label(f"    {stats.synced_files:,} of {stats.total_files:,} files synced")
 
         # Activity flags take priority — same logic as full update
         status = stats.status.lower()
+        is_idle = False
 
         if stats.is_listing:
             self.indicator.set_icon_full(self.ICON_SYNCING, "Indexing")
@@ -507,9 +537,13 @@ class BisyncTray:
             else:
                 self.indicator.set_icon_full(self.ICON_SYNCED, "Up to date")
                 self.status_item.set_label("Up to date")
+                is_idle = True
         else:
             self.indicator.set_icon_full(self.ICON_IDLE, "Starting")
             self.status_item.set_label("Starting...")
+
+        # Adaptive polling: slow down when idle, speed up when active
+        self._adjust_poll_interval(is_idle)
 
         # Update errors visibility
         self.errors_item.set_visible(stats.errors > 0)
@@ -517,6 +551,39 @@ class BisyncTray:
             self.errors_item.set_label(f"View Errors ({stats.errors})...")
 
         return True
+
+    def _attempt_daemon_restart(self) -> bool:
+        """Attempt to restart the Go daemon after a crash."""
+        print("Attempting daemon restart...")
+        if self._start_go_daemon():
+            print("Daemon restarted successfully")
+            self._daemon_restart_count = 0
+        return False  # Don't repeat the timeout
+
+    def _adjust_poll_interval(self, is_idle: bool):
+        """Switch between 5s and 30s polling based on idle state."""
+        import time as _time
+        now = _time.monotonic()
+
+        if is_idle:
+            if self._idle_since is None:
+                self._idle_since = now
+            elif now - self._idle_since > 60 and self._status_poll_interval != 30:
+                # Idle for >1 minute, switch to 30s polling
+                self._status_poll_interval = 30
+                if self._status_poll_id is not None:
+                    GLib.source_remove(self._status_poll_id)
+                self._status_poll_id = GLib.timeout_add_seconds(30, self._update_status_light)
+                return  # Current callback will not be rescheduled
+        else:
+            self._idle_since = None
+            if self._status_poll_interval != 5:
+                # Back to active, switch to 5s polling
+                self._status_poll_interval = 5
+                if self._status_poll_id is not None:
+                    GLib.source_remove(self._status_poll_id)
+                self._status_poll_id = GLib.timeout_add_seconds(5, self._update_status_light)
+                return
 
     def _update_status_light_python(self) -> bool:
         """Lightweight status update for Python daemon."""
