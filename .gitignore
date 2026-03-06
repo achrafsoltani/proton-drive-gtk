@@ -27,3 +27,4 @@ nohup.out
 # Local config
 .env
 go-daemon/bin/
+go-daemon/proton-sync-daemon
