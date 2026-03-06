@@ -2,7 +2,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -19,11 +18,11 @@ var (
 
 func main() {
 	var (
-		showVersion    = flag.Bool("version", false, "Show version")
-		debug          = flag.Bool("debug", false, "Enable debug logging")
-		localPath      = flag.String("local", "", "Local sync path (overrides config)")
-		remoteName     = flag.String("remote", "", "Remote name (overrides config)")
-		maxTransfers   = flag.Int("max-transfers", 4, "Max concurrent uploads/downloads")
+		showVersion  = flag.Bool("version", false, "Show version")
+		debug        = flag.Bool("debug", false, "Enable debug logging")
+		localPath    = flag.String("local", "", "Local sync path (overrides config)")
+		remoteName   = flag.String("remote", "", "Remote name (overrides config)")
+		maxTransfers = flag.Int("max-transfers", 4, "Max concurrent uploads/downloads")
 	)
 	flag.Parse()
 
@@ -42,6 +41,17 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
+	// Initialise embedded rclone
+	rclone.Initialize()
+	defer rclone.Finalize()
+
+	version, err := rclone.GetVersion()
+	if err != nil {
+		logger.Error("failed to get embedded rclone version", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("embedded rclone ready", "version", version)
+
 	// Load config
 	cfg, err := config.Load()
 	if err != nil {
@@ -59,16 +69,6 @@ func main() {
 	if *maxTransfers > 0 {
 		cfg.MaxConcurrentTransfers = *maxTransfers
 	}
-
-	// Check rclone
-	version, err := rclone.GetVersion(context.Background())
-	if err != nil {
-		logger.Error("rclone not found", "error", err)
-		fmt.Fprintln(os.Stderr, "Error: rclone is required but not installed.")
-		fmt.Fprintln(os.Stderr, "Install it with: sudo apt install rclone")
-		os.Exit(1)
-	}
-	logger.Info("rclone found", "version", version)
 
 	// Create and run daemon
 	d, err := daemon.New(cfg, logger)
