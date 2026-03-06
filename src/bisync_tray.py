@@ -1073,46 +1073,30 @@ class BisyncTray:
         Gtk.main()
 
     def _check_rclone(self) -> bool:
-        """Check if rclone is available and configured."""
-        # Check rclone is installed
-        try:
-            result = subprocess.run(
-                ['rclone', 'version'],
-                capture_output=True,
-                timeout=5
-            )
-            if result.returncode != 0:
-                self._show_error(
-                    "rclone not found",
-                    "Please install rclone: sudo apt install rclone"
-                )
-                return False
-        except (subprocess.SubprocessError, FileNotFoundError):
+        """Check if rclone remote is configured (reads config file directly)."""
+        rclone_conf = Path.home() / ".config" / "rclone" / "rclone.conf"
+        if not rclone_conf.exists():
             self._show_error(
-                "rclone not found",
-                "Please install rclone: sudo apt install rclone"
+                "Proton Drive not configured",
+                "Please install rclone and configure it:\n"
+                "sudo apt install rclone\nrclone config\n\n"
+                f"Add a remote named '{self.config.remote_name}'"
             )
             return False
 
-        # Check remote is configured
         try:
-            result = subprocess.run(
-                ['rclone', 'listremotes'],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            if f"{self.config.remote_name}:" not in result.stdout:
+            content = rclone_conf.read_text()
+            if f"[{self.config.remote_name}]" not in content:
                 self._show_error(
                     "Proton Drive not configured",
                     f"Please configure rclone:\nrclone config\n\n"
                     f"Add a remote named '{self.config.remote_name}'"
                 )
                 return False
-        except subprocess.SubprocessError:
+        except OSError:
             self._show_error(
-                "rclone error",
-                "Failed to check rclone configuration"
+                "Configuration error",
+                "Failed to read rclone configuration"
             )
             return False
 
