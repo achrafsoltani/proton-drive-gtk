@@ -1,18 +1,35 @@
-// Package rclone provides a wrapper for rclone commands.
+// Package rclone provides in-process access to rclone via librclone.
 package rclone
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/rclone/rclone/librclone/librclone"
+
+	_ "github.com/rclone/rclone/backend/local"       // register local filesystem backend
+	_ "github.com/rclone/rclone/backend/protondrive" // register Proton Drive backend
+	_ "github.com/rclone/rclone/fs/operations"  // register operations/* RC commands
+	_ "github.com/rclone/rclone/fs/config"      // register config/* RC commands
 )
 
-// RemoteFile represents a file from rclone lsjson output.
+// Initialize initialises rclone as an in-process library.
+// Must be called once before any Client methods.
+func Initialize() {
+	librclone.Initialize()
+}
+
+// Finalize releases rclone resources. Call on shutdown.
+func Finalize() {
+	librclone.Finalize()
+}
+
+// RemoteFile represents a file from rclone list output.
 type RemoteFile struct {
 	Path     string `json:"Path"`
 	Name     string `json:"Name"`
@@ -32,7 +49,7 @@ func (rf *RemoteFile) ParsedModTime() float64 {
 	return float64(t.Unix())
 }
 
-// Client wraps rclone commands.
+// Client wraps rclone operations via librclone RPC.
 type Client struct {
 	remoteName string
 	logger     *slog.Logger
@@ -46,151 +63,166 @@ func NewClient(remoteName string, logger *slog.Logger) *Client {
 	}
 }
 
-// ListDir lists a directory on the remote.
-func (c *Client) ListDir(ctx context.Context, path string) ([]*RemoteFile, error) {
-	remotePath := c.remoteName + ":"
-	if path != "" {
-		remotePath += path
+// StreamListRecursive lists all files recursively, calling handler for each file.
+func (c *Client) StreamListRecursive(_ context.Context, handler func(*RemoteFile) error) error {
+	params := map[string]interface{}{
+		"fs":     c.remoteName + ":",
+		"remote": "",
+		"opt": map[string]interface{}{
+			"recurse":   true,
+			"filesOnly": true,
+		},
 	}
 
-	cmd := exec.CommandContext(ctx, "rclone", "lsjson", remotePath)
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("rclone lsjson failed: %w", err)
+	out, status := librclone.RPC("operations/list", mustJSON(params))
+	if status != 200 {
+		return fmt.Errorf("list failed (status %d): %s", status, out)
 	}
 
-	var files []*RemoteFile
-	if err := json.Unmarshal(output, &files); err != nil {
-		return nil, fmt.Errorf("failed to parse rclone output: %w", err)
+	var result struct {
+		List []*RemoteFile `json:"list"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		return fmt.Errorf("failed to parse list: %w", err)
 	}
 
-	return files, nil
-}
-
-// StreamListRecursive streams all files recursively, calling handler for each file.
-// This avoids loading all files into memory at once.
-func (c *Client) StreamListRecursive(ctx context.Context, handler func(*RemoteFile) error) error {
-	cmd := exec.CommandContext(ctx, "rclone", "lsjson", "-R", c.remoteName+":")
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start rclone: %w", err)
-	}
-
-	decoder := json.NewDecoder(stdout)
-
-	// Read opening bracket
-	if _, err := decoder.Token(); err != nil {
-		cmd.Process.Kill()
-		return fmt.Errorf("failed to read JSON start: %w", err)
-	}
-
-	// Stream each file
-	for decoder.More() {
-		var rf RemoteFile
-		if err := decoder.Decode(&rf); err != nil {
-			c.logger.Warn("failed to decode file entry", "error", err)
-			continue
-		}
-
-		if !rf.IsDir {
-			if err := handler(&rf); err != nil {
-				cmd.Process.Kill()
-				return err
-			}
+	for _, rf := range result.List {
+		if err := handler(rf); err != nil {
+			return err
 		}
 	}
 
-	return cmd.Wait()
+	return nil
 }
 
 // Download downloads a file from remote to local.
-func (c *Client) Download(ctx context.Context, remotePath, localPath string) error {
-	src := c.remoteName + ":" + remotePath
-	cmd := exec.CommandContext(ctx, "rclone", "copyto", src, localPath)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("download failed: %s: %w", string(output), err)
+func (c *Client) Download(_ context.Context, remotePath, localPath string) error {
+	params := map[string]interface{}{
+		"srcFs":     c.remoteName + ":",
+		"srcRemote": remotePath,
+		"dstFs":     filepath.Dir(localPath),
+		"dstRemote": filepath.Base(localPath),
+	}
+
+	out, status := librclone.RPC("operations/copyfile", mustJSON(params))
+	if status != 200 {
+		return fmt.Errorf("download failed (status %d): %s", status, out)
 	}
 	return nil
 }
 
 // Upload uploads a file from local to remote.
-func (c *Client) Upload(ctx context.Context, localPath, remotePath string) error {
-	dst := c.remoteName + ":" + remotePath
-	cmd := exec.CommandContext(ctx, "rclone", "copyto",
-		"--protondrive-replace-existing-draft=true",
-		localPath, dst)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// Check if file already exists (not really an error)
-		if strings.Contains(strings.ToLower(string(output)), "already exists") {
+func (c *Client) Upload(_ context.Context, localPath, remotePath string) error {
+	params := map[string]interface{}{
+		"srcFs":     filepath.Dir(localPath),
+		"srcRemote": filepath.Base(localPath),
+		"dstFs":     c.remoteName + ",replace_existing_draft=true:",
+		"dstRemote": remotePath,
+	}
+
+	out, status := librclone.RPC("operations/copyfile", mustJSON(params))
+	if status != 200 {
+		outLower := strings.ToLower(out)
+		if strings.Contains(outLower, "already exists") {
 			c.logger.Info("file already exists on remote", "path", remotePath)
 			return nil
 		}
-		return fmt.Errorf("upload failed: %s: %w", string(output), err)
+		return fmt.Errorf("upload failed (status %d): %s", status, out)
 	}
 	return nil
 }
 
 // Delete deletes a file on the remote.
-func (c *Client) Delete(ctx context.Context, remotePath string) error {
-	path := c.remoteName + ":" + remotePath
-	cmd := exec.CommandContext(ctx, "rclone", "deletefile", path)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("delete failed: %s: %w", string(output), err)
+func (c *Client) Delete(_ context.Context, remotePath string) error {
+	params := map[string]interface{}{
+		"fs":     c.remoteName + ":",
+		"remote": remotePath,
+	}
+
+	out, status := librclone.RPC("operations/deletefile", mustJSON(params))
+	if status != 200 {
+		return fmt.Errorf("delete failed (status %d): %s", status, out)
 	}
 	return nil
 }
 
 // Mkdir creates a directory on the remote.
-func (c *Client) Mkdir(ctx context.Context, remotePath string) error {
-	path := c.remoteName + ":" + remotePath
-	cmd := exec.CommandContext(ctx, "rclone", "mkdir", path)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("mkdir failed: %s: %w", string(output), err)
+func (c *Client) Mkdir(_ context.Context, remotePath string) error {
+	params := map[string]interface{}{
+		"fs":     c.remoteName + ":",
+		"remote": remotePath,
+	}
+
+	out, status := librclone.RPC("operations/mkdir", mustJSON(params))
+	if status != 200 {
+		return fmt.Errorf("mkdir failed (status %d): %s", status, out)
 	}
 	return nil
 }
 
 // CheckRemote checks if the remote is configured and accessible.
-func (c *Client) CheckRemote(ctx context.Context) error {
-	// Check if remote exists
-	cmd := exec.CommandContext(ctx, "rclone", "listremotes")
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to list remotes: %w", err)
+func (c *Client) CheckRemote(_ context.Context) error {
+	out, status := librclone.RPC("config/listremotes", "{}")
+	if status != 200 {
+		return fmt.Errorf("failed to list remotes: %s", out)
 	}
 
-	if !strings.Contains(string(output), c.remoteName+":") {
-		return fmt.Errorf("remote %q not configured", c.remoteName)
+	var result struct {
+		Remotes []string `json:"remotes"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		return fmt.Errorf("failed to parse remotes: %w", err)
+	}
+
+	found := false
+	for _, r := range result.Remotes {
+		if r == c.remoteName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("remote %q not configured in rclone", c.remoteName)
 	}
 
 	// Try to access the remote
-	cmd = exec.CommandContext(ctx, "rclone", "lsd", c.remoteName+":")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to access remote: %w", err)
+	listParams := map[string]interface{}{
+		"fs":     c.remoteName + ":",
+		"remote": "",
+		"opt": map[string]interface{}{
+			"dirsOnly": true,
+		},
+	}
+
+	out, status = librclone.RPC("operations/list", mustJSON(listParams))
+	if status != 200 {
+		return fmt.Errorf("failed to access remote: %s", out)
 	}
 
 	return nil
 }
 
-// GetVersion returns the rclone version.
-func GetVersion(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, "rclone", "version")
-	output, err := cmd.Output()
-	if err != nil {
+// GetVersion returns the embedded rclone version.
+func GetVersion() (string, error) {
+	out, status := librclone.RPC("core/version", "{}")
+	if status != 200 {
+		return "", fmt.Errorf("failed to get version: %s", out)
+	}
+
+	var result struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		return "", err
 	}
 
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	if scanner.Scan() {
-		return scanner.Text(), nil
+	return "rclone " + result.Version, nil
+}
+
+func mustJSON(v interface{}) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
 	}
-	return "", fmt.Errorf("no version output")
+	return string(b)
 }
